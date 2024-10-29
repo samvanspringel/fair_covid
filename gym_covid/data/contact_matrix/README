@@ -1,0 +1,10 @@
+Procedures to construct the contact matrices used Abrams et al. (2021):
+- Extract the raw contact matrices from Socrates, which results in an .RData file containing all matrix components:
+	* Clone socrates: https://github.com/lwillem/socrates_rshiny
+	* Checkout commit a5e892effd2cbaac9dd80db8a64e97591ed149d1 of socrates_rshiny
+	* Copy the file get_epidemics2021_contact_matrices.R to the socrates_rshiny repo
+	* Change directory to socrates_rshiny, and run: Rscript get_epidemics2021_contact_matrices.R
+	* This will generate an RData file: contact_matrices_be_2010.RData
+	* Copy this file to this directory as be_2010.RData
+- Preprocess be_2010.RData file into a set of CSV files:
+	* python data/contact_matrix/preprocessing.py <path to contact_matrices_be_2010.RData> data/population/be_2010-01-01.csv <directory where matrices will be saved>
