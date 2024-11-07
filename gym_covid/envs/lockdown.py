@@ -1,4 +1,4 @@
-import gymnasium as gym
+import gym
 import datetime
 import numpy as np
 

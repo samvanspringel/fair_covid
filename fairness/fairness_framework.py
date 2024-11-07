@@ -1,6 +1,6 @@
 from typing import Union, List
 
-import gymnasium as gym
+import gym as gym
 
 from fairness import SensitiveAttribute
 from fairness.group import GroupNotion, ALL_GROUP_NOTIONS, TIMESTEP_GROUP_NOTIONS
@@ -9,6 +9,10 @@ from fairness.history import History, SlidingWindowHistory, DiscountedHistory, H
 from fairness.individual import ALL_INDIVIDUAL_NOTIONS, IndividualNotion, TIMESTEP_INDIVIDUAL_NOTIONS
 from fairness.individual.individual_fairness import IndividualFairness
 from scenario import CombinedState
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 
 
 class FairnessFramework(object):
@@ -102,6 +106,23 @@ class FairnessFramework(object):
         return self.individual_fairness.get_notion(individual_notion, history, threshold,
                                                    similarity_metric, alpha, distance_metric)
 
+    def check_fairness(self):
+        actions = self.history.actions
+        fairness_actions = np.zeros(len(actions))
+        w_l = 3
+        w_s = 2
+        w_w = 1
+        counter = 0
+        for action in actions:
+            p_w, p_s, p_l = action
+            fairness = 0
+            for i in range(10):
+                fairness += i/10*(p_w*w_w + p_s*w_s + p_l*w_l)
+            fairness_actions[counter] += fairness
+            print(f"Fairness of action {action} is {fairness}")
+            counter += 1
+        return fairness_actions.mean()
+
 
 class ExtendedfMDP(gym.Env):
     """An extended job hiring fMDP, with a fairness framework"""
@@ -151,7 +172,7 @@ class ExtendedfMDP(gym.Env):
         self.fairness_framework.update_history(self._episode, self._t, entities)
 
         # Add fairness notions as additional rewards
-        reward = [reward]
+        reward = reward #TODO changed
         # Group notions: For each sensitive attribute
         for sensitive_attribute in self.fairness_framework.sensitive_attributes:
             for notion in self.fairness_framework.group_notions:

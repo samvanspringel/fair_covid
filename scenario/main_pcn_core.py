@@ -3,17 +3,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import sys
+
 sys.path.append("./")  # for command-line execution to find the other packages (e.g. envs)
 
-from agent.pcn.pcn_core import epsilon_metric, non_dominated, compute_hypervolume, add_episode, \
-    choose_commands, Transition
+from agent.pcn.pcn_core import epsilon_metric, non_dominated, compute_hypervolume, add_episode, Transition
+from agent.pcn.pcn import choose_commands
 from agent.pcn.logger import Logger
 from create_fair_env import *
 from fairness.fairness_framework import ExtendedfMDP
 from loggers.logger import AgentLogger, LeavesLogger, TrainingPCNLogger, EvalLogger
 from scenario.fraud_detection.env import NUM_FRAUD_FEATURES
 from scenario.job_hiring.env import NUM_JOB_HIRING_FEATURES
-
 
 ss_emb = {
     'conv1d': nn.Sequential(
@@ -94,12 +94,11 @@ class CovidModel(nn.Module):
 
     def forward(self, state, desired_return, desired_horizon):
         # filter desired_return to only keep used objectives
-        #print(desired_return)
         desired_return = desired_return[:, self.objectives]
         c = torch.cat((desired_return, desired_horizon), dim=-1)
         # commands are scaled by a fixed factor
         c = c * self.scaling_factor
-        #print(state)
+        # print(state)
         ss, se, sa = state
         s = self.ss_emb(ss.float()) * self.se_emb(se.float()) * self.sa_emb(sa.float())
         s = self.s_emb(s)
@@ -154,7 +153,6 @@ def multidiscrete_env(env):
     return env
 
 
-
 def run_episode_fairness(env, model, desired_return, desired_horizon, max_return, agent_logger, current_ep, current_t,
                          eval=False, normalise_state=False, eval_axes=False, log_compact=False):
     curr_t = time.time()
@@ -174,10 +172,10 @@ def run_episode_fairness(env, model, desired_return, desired_horizon, max_return
         status = "train"
     while not done:
         curr_obs = env.normalise_state(obs) if normalise_state else obs
-        action, scores = choose_action_hire(model, curr_obs if normalise_state else curr_obs.to_array(),
-                                            desired_return,
-                                            desired_horizon, eval=eval, return_probs=True)
-        n_obs, reward, done, info = env.step(action, scores)
+        action = choose_action(model, curr_obs if normalise_state else curr_obs.to_array(),
+                               desired_return,
+                               desired_horizon, eval=eval)
+        n_obs, reward, done, info = env.step(action, None)
         next_obs = env.normalise_state(n_obs) if normalise_state else n_obs
 
         transitions.append(Transition(
@@ -187,7 +185,6 @@ def run_episode_fairness(env, model, desired_return, desired_horizon, max_return
             next_observation=next_obs if normalise_state else next_obs.to_array(),
             terminal=done
         ))
-
         obs = n_obs
         # clip desired return, to return-upper-bound,
         # to avoid negative returns giving impossible desired returns
@@ -228,7 +225,7 @@ def eval_(env, model, coverage_set, horizons, max_return, agent_logger, current_
     return e_returns, all_transitions
 
 
-def update_model_hire(model, opt, experience_replay, batch_size, noise=0.):
+def update_model(model, opt, experience_replay, batch_size, noise=0.):
     batch = []
     # randomly choose episodes from experience buffer
     s_i = np.random.choice(np.arange(len(experience_replay)), size=batch_size, replace=True)
@@ -238,23 +235,16 @@ def update_model_hire(model, opt, experience_replay, batch_size, noise=0.):
         # choose random timestep from episode,
         # use it's return and leftover timesteps as desired return and horizon
         t = np.random.randint(0, len(ep))
+        # print(ep[t])
+        # exit()
         # reward contains return until end of episode
         s_t, a_t, r_t, h_t = ep[t].observation, ep[t].action, np.float32(ep[t].reward), np.float32(len(ep) - t)
         batch.append((s_t, a_t, r_t, h_t))
 
     obs, actions, desired_return, desired_horizon = zip(*batch)
-    #print(obs[0])
-    #exit()
-    obs = torch.tensor(obs).to(device)
-    # ss, se, sa = obs[0]
-    # ss, se, sa = torch.tensor(ss).to(device), torch.tensor(se).to(device), torch.tensor(sa).to(device)
-    # obs = (ss, se, sa)
-    # actions = actions[:1]
-    # desired_return = torch.tensor(desired_return[0]).to(device)
-    # desired_horizon = desired_horizon[:1]
-    #print(obs, actions, desired_return, desired_horizon)
-    #exit()
-
+    # since each state is a tuple with (compartment, events, prev_action), reorder obs
+    obs = zip(*obs)
+    obs = tuple([torch.tensor(o).to(device) for o in obs])
     # TODO TEST add noise to the desired return
     desired_return = torch.tensor(desired_return).to(device)
     desired_return = desired_return + noise * torch.normal(0, 1, size=desired_return.shape,
@@ -262,8 +252,8 @@ def update_model_hire(model, opt, experience_replay, batch_size, noise=0.):
     log_prob = model(obs,
                      desired_return,
                      torch.tensor(desired_horizon).unsqueeze(1).to(device))
-    opt.zero_grad()
 
+    opt.zero_grad()
     # check if actions are continuous
     # TODO hacky
     if model.__class__.__name__ == 'ContinuousHead':
@@ -278,7 +268,7 @@ def update_model_hire(model, opt, experience_replay, batch_size, noise=0.):
     l.backward()
     opt.step()
 
-    return l.detach().cpu().numpy(), log_prob.detach().cpu().numpy()
+    return l, log_prob
 
 
 def choose_action_hire(model, obs, desired_return, desired_horizon, eval=False, return_probs=False):
@@ -318,6 +308,31 @@ def choose_action_hire(model, obs, desired_return, desired_horizon, eval=False, 
         return action, log_probs
     else:
         return action
+
+
+def choose_action(model, obs, desired_return, desired_horizon, eval=False):
+    # if observation is not a simple np.array, convert individual arrays to tensors
+    obs = [torch.tensor([o]).to(device) for o in obs] if type(obs) == tuple else torch.tensor([obs]).to(device)
+    log_probs = model(obs,
+                      torch.tensor([desired_return]).to(device),
+                      torch.tensor([desired_horizon]).unsqueeze(1).to(device))
+    log_probs = log_probs.detach().cpu().numpy()[0]
+    # check if actions are continuous
+    # TODO hacky
+    if model.__class__.__name__ == 'ContinuousHead':
+        action = log_probs
+        # add some noise for randomness
+        if not eval:
+            action = np.clip(action + np.random.normal(0, 0.1, size=action.shape).astype(np.float32), 0, 1)
+    else:
+        # if evaluating: act greedily
+        if eval:
+            return np.argmax(log_probs, axis=-1)
+        if log_probs.ndim == 1:
+            action = np.random.choice(np.arange(len(log_probs)), p=np.exp(log_probs))
+        elif log_probs.ndim == 2:
+            action = np.array(list([np.random.choice(np.arange(len(lp)), p=np.exp(lp)) for lp in log_probs]))
+    return action
 
 
 def train_fair(env,
@@ -379,11 +394,19 @@ def train_fair(env,
         obs = env.reset()
         done = False
         while not done:
+            # print("initial state", obs)
             curr_obs = env.normalise_state(obs) if normalise_state else obs
-            action = np.random.randint(0, env.nA)
+            #action = np.random.randint(0, env.nA)
+            action = env.action_space.sample()
             n_obs, reward, done, info = env.step(action, scores=np.full(env.nA, fill_value=1 / env.nA))
             next_obs = env.normalise_state(n_obs) if normalise_state else n_obs
-            # TODO
+
+            # TODO FAIRNESS
+
+            fairness = env.fairness_framework.check_fairness()
+            print(fairness)
+
+
             if step % 100 == 0:
                 print("t=", step, ep, action, reward)
 
@@ -413,19 +436,19 @@ def train_fair(env,
 
     while step < total_steps:
         print("loop", update_num)
-
         loss = []
         entropy = []
-        for moupd in range(n_model_updates):
-            l, lp = update_model_hire(model, opt, experience_replay, batch_size=batch_size)
-            loss.append(l)
-            lp = lp
+        for _ in range(n_model_updates):
+            l, lp = update_model(model, opt, experience_replay, batch_size=batch_size)
+            loss.append(l.detach().cpu().numpy())
+            lp = lp.detach().cpu().numpy()
             ent = np.sum(-np.exp(lp) * lp)
             entropy.append(ent)
         print("model updates", update_num)
 
         desired_return, desired_horizon = choose_commands(experience_replay, n_er_episodes, objectives)
 
+        # exit()
         # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
         # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
         # leaves = np.array([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
@@ -467,8 +490,8 @@ def train_fair(env,
               f'\t loss {np.mean(loss):.3E}')
 
         # compute hypervolume of leaves
-        valid_e_returns = e_returns[np.all(e_returns[:, objectives] >= ref_point[objectives, ], axis=1)]
-        hv = compute_hypervolume(np.expand_dims(valid_e_returns[:, objectives], 0), ref_point[objectives, ])[0] if len(
+        valid_e_returns = e_returns[np.all(e_returns[:, objectives] >= ref_point[objectives,], axis=1)]
+        hv = compute_hypervolume(np.expand_dims(valid_e_returns[:, objectives], 0), ref_point[objectives,])[0] if len(
             valid_e_returns) and len(objectives) > 1 else 0
 
         # current coverage set
@@ -515,6 +538,7 @@ def train_fair(env,
 
 if __name__ == '__main__':
     import time
+
     t_start = time.time()
 
     parser = argparse.ArgumentParser(description='PCN-Fair', formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -550,10 +574,11 @@ if __name__ == '__main__':
     # args.n_transactions = 200
     # args.fraud_proportion = 0.20
     # # #
-    args.top_episodes = 5  # TODO
+    args.top_episodes = 50  # TODO
+    args.steps = 1e4  # TODO
     # args.n_episodes = 25
     # args.er_size = 200
-    # args.model_updates = 10
+    args.model_updates = 10
     # # #
     # # args.objectives = [0, 5, 5, 5]  # TODO
     # # # args.objectives = [0, 6, 6, 6]  # TODO
@@ -577,11 +602,12 @@ if __name__ == '__main__':
 
     env, logdir, ref_point, scaling_factor, max_return = create_fairness_framework_env(args)
 
-    #kw = "small" if args.model == "densesmall" else "big"
-    ss, se, sa = ss_emb['big'], se_emb['big'], sa_emb['big']
+    # kw = "small" if args.model == "densesmall" else "big"
+    #ss, se, sa = ss_emb['big'], se_emb['big'], sa_emb['big']
+    ss, se, sa = ss_emb['small'], se_emb['small'], sa_emb['small']
 
     model = CovidModel(env.nA, scaling_factor, tuple(args.objectives), ss, se, sa).to(device)
-    model = DiscreteHead(model)
+    model = ContinuousHead(model)
 
     # from cProfile import Profile
     # with Profile() as pr:

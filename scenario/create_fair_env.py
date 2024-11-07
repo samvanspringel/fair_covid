@@ -1,23 +1,15 @@
 import random
 
-import gymnasium as gym
 import torch
-import torch.nn as nn
-import numpy as np
 from datetime import datetime
-import os
 
 from agent.pcn.main_pcn import multidiscrete_env
-from gym_covid.envs import *
+from gym_covid import *
 import argparse
-import torch.nn.functional as F
 
-import wandb
 from pytz import timezone
 
 import sys
-
-from scenario.main_pcn_core import ss_emb
 
 sys.path.append("./")  # for command-line execution to find the other packages (e.g. envs)
 
@@ -229,11 +221,6 @@ def create_fraud_env(args):
 def create_covid_env(args):
     import torch
     import argparse
-    from datetime import datetime
-    import uuid
-    import os
-    import gym_covid
-
 
     parser = argparse.ArgumentParser(description='PCN')
     parser.add_argument('--objectives', default=[1, 5], type=int, nargs='+',
@@ -260,6 +247,7 @@ def create_covid_env(args):
     print(args)
 
     device = 'cpu'
+    args.action = "continuous"
 
     env_type = 'ODE' if args.env == 'ode' else 'Binomial'
     n_evaluations = 1 if env_type == 'ODE' else 10
@@ -396,13 +384,14 @@ def create_fairness_framework_env(args):
         all_group_notions)
     _num_notions = _num_group_notions + len(all_individual_notions)
     max_reward = args.episode_length * 1
-    scale = np.array([1] + [1] * _num_notions)
-    ref_point = np.array([-max_reward] + [-args.episode_length] * _num_notions)
-    scaling_factor = torch.tensor([[1.0] + ([1] * _num_notions) + [0.1]]).to(device)
-    max_return = np.array([max_reward] + [0] * _num_notions) / scale
+    scale = np.array([800000, 10000, 50., 20, 50, 100])
+    ref_point = np.array([-15000000, -200000, -1000.0, -1000.0, -1000.0, -1000.0]) / scale
+    scaling_factor = torch.tensor([[1, 1, 1, 1, 1, 1, 0.1]]).to(device)
+    max_return = np.array([0, 0, 0, 0, 0, 0]) / scale
 
     env.nA = env.env.nA
     env.scale = scale
+    env.action_space = env.env.action_space
 
     return env, logdir, ref_point, scaling_factor, max_return
 

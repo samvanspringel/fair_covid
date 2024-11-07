@@ -154,23 +154,3 @@ def add_episode(transitions, experience_replay, gamma=1., max_size=100, step=0):
     else:
         heapq.heappush(experience_replay, (1, step, transitions))
 
-
-def choose_commands(experience_replay, n_episodes, objectives, threshold=0.2):
-    # get best episodes, according to their crowding distance
-    episodes = nlargest(n_episodes, experience_replay, objectives ,threshold=threshold)
-    returns, horizons = list(zip(*[(e[2][0].reward, len(e[2])) for e in episodes]))
-    # keep only non-dominated returns
-    returns, nd_i = non_dominated(np.array(returns), return_indexes=True)
-    horizons = np.array(horizons)[nd_i]
-    # pick random return from random best episode
-    r_i = np.random.randint(0, len(returns))
-    desired_horizon = np.float32(horizons[r_i]-2)
-    # mean and std per objective
-    m, s = np.mean(returns, axis=0), np.std(returns, axis=0)
-    # desired return is sampled from [M, M+S], to try to do better than mean return
-    desired_return = returns[r_i].copy()
-    # random objective
-    r_i = np.random.choice(objectives)
-    desired_return[r_i] += np.random.uniform(high=s[r_i])
-    desired_return = np.float32(desired_return)
-    return desired_return, desired_horizon

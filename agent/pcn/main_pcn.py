@@ -1,10 +1,8 @@
-import gymnasium as gym
-import torch
+import gym
 import torch.nn as nn
 import torch.nn.functional as F
 # import cv2
 import numpy as np
-import wandb
 
 
 class MultiDiscreteAction(gym.ActionWrapper):
@@ -33,19 +31,19 @@ class TodayWrapper(gym.Wrapper):
 
     def reset(self):
         s = super(TodayWrapper, self).reset()
-        ss, se, sa = s
+        ss, se, sa = s[1:]
         return (ss[-1].T, se[-1], sa)
 
     # step function of covid env returns simulation results of every day of timestep
     # only keep current day
     # also discard first reward
     def step(self, action):
-        s, r, d, _, i = super(TodayWrapper, self).step(action)
-        ss, se, sa = s
+        s, r, d, _ = super(TodayWrapper, self).step(action)
+        ss, se, sa = s[1:]
         # sum all the social burden objectives together:
         p_tot = r[2:].sum()
         r = np.concatenate((r, p_tot[None]))
-        return (ss[-1].T, se[-1], sa), r, d, _, i
+        return (ss[-1].T, se[-1], sa), r, d, _
 
 
 class HistoryEnv(gym.Wrapper):
@@ -221,11 +219,11 @@ def multidiscrete_env(env):
 if __name__ == '__main__':
     import torch
     import argparse
-    from agent.pcn.pcn import train
+    from pcn import train
     from datetime import datetime
     import uuid
     import os
-    import gym_covid
+    from gym_covid.envs import *
 
     parser = argparse.ArgumentParser(description='PCN')
     parser.add_argument('--objectives', default=[1, 5], type=int, nargs='+',
@@ -265,6 +263,7 @@ if __name__ == '__main__':
     max_return = np.array([0, 0, 0, 0, 0, 0]) / scale
     # max_return = np.array([0, -8000, 0, 0, 0, 0])/scale
     # keep only a selection of objectives
+    args.action = "continuous"
 
     if args.action == 'discrete':
         env = gym.make(f'BECovidWithLockdown{env_type}Discrete-v0')
@@ -306,10 +305,13 @@ if __name__ == '__main__':
     #     model.scaling_factor = model.scaling_factor.to(device)
 
     logdir = f'{os.getenv("VSC_SCRATCH", "/tmp")}/pcn/commit_8cfebc4c41aa5c400a7e593ffd681c3c03e532b1/until2021/'
-    logdir += '/'.join([f'{k}_{v}' for k, v in vars(args).items()]) + '/'
-    logdir += datetime.now().strftime('%Y-%m-%d_%H-%M-%S_') + str(uuid.uuid4())[:4] + '/'
+    # logdir += '/'.join([f'{k}_{v}' for k, v in vars(args).items()]) + '/'
+    # logdir += datetime.now().strftime('%Y-%m-%d_%H-%M-%S_') + str(uuid.uuid4())[:4] + '/'
 
-    wandb.init(project='pcn-covid', entity='icimpean', config={k: v for k, v in vars(args).items()})
+    #wandb.init(project='pcn-covid', entity='icimpean', config={k: v for k, v in vars(args).items()})
+
+    args.top_episodes = 3  # TODO
+    args.steps = 3e2  # TODO
 
     train(env,
           model,

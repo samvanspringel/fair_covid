@@ -187,7 +187,7 @@ def run_episode(env, model, desired_return, desired_horizon, max_return, eval=Fa
     done = False
     while not done:
         action = choose_action(model, obs, desired_return, desired_horizon, eval=eval)
-        n_obs, reward, done, _, _ = env.step(action)
+        n_obs, reward, done, _ = env.step(action)
 
         transitions.append(Transition(
             observation=obs,
@@ -196,7 +196,6 @@ def run_episode(env, model, desired_return, desired_horizon, max_return, eval=Fa
             next_observation=n_obs,
             terminal=done
         ))
-
         obs = n_obs
         # clip desired return, to return-upper-bound, 
         # to avoid negative returns giving impossible desired returns
@@ -317,8 +316,7 @@ def train(env,
         done = False
         while not done:
             action = env.action_space.sample()
-            n_obs, reward, done, _, _ = env.step(action)
-            print("reward:", reward)
+            n_obs, reward, done, _ = env.step(action)
             transitions.append(Transition(obs, action, np.float32(reward).copy(), n_obs, done))
             obs = n_obs
             step += 1
@@ -335,10 +333,11 @@ def train(env,
             entropy.append(ent)
 
         desired_return, desired_horizon = choose_commands(experience_replay, n_er_episodes, objectives)
-
+        #exit()
          # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
-        leaves = np.array([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay)//2:]])
-        e_lengths, e_returns = zip(*leaves)
+        #print(experience_replay)
+        e_lengths, e_returns = [(len(e[2])) for e in experience_replay[len(experience_replay) // 2:]], \
+                               [(e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]]
         e_lengths, e_returns = np.array(e_lengths), np.array(e_returns)
         try:
             if len(experience_replay) == max_size:
@@ -375,13 +374,13 @@ def train(env,
         valid_e_returns = e_returns[np.all(e_returns[:,objectives] >= ref_point[objectives,], axis=1)]
         hv = compute_hypervolume(np.expand_dims(valid_e_returns[:,objectives], 0), ref_point[objectives,])[0] if len(valid_e_returns) else 0
 
-        wandb.log({
-            'episode': total_episodes,
-            'episode_steps': np.mean(horizons),
-            'loss': np.mean(loss),
-            'entropy': np.mean(entropy),
-            'hypervolume': hv,
-        }, step=step)
+        # wandb.log({
+        #     'episode': total_episodes,
+        #     'episode_steps': np.mean(horizons),
+        #     'loss': np.mean(loss),
+        #     'entropy': np.mean(entropy),
+        #     'hypervolume': hv,
+        # }, step=step)
 
         if step >= (n_checkpoints+1)*total_steps/10:
             torch.save(model, f'{logger.logdir}/model_{n_checkpoints+1}.pt')
@@ -394,7 +393,7 @@ def train(env,
             e_returns = e_returns[e_i]
             e_lengths = e_lengths[e_i]
 
-            e_r, t_r = eval(env, model, e_returns, e_lengths, max_return, gamma=gamma, n=n_evaluations)
+            e_r, t_r = eval_(env, model, e_returns, e_lengths, max_return, gamma=gamma, n=n_evaluations)
             # save raw evaluation returns
             logger.put(f'eval/returns/{n_checkpoints}', e_r, 0, f'{len(e_r)}d')
             # compute e-metric
@@ -407,20 +406,20 @@ def train(env,
             print(f'epsilon max/mean: {epsilon.max():.3f} \t {epsilon.mean():.3f}')
             print('='*22)
 
-            nd_coverage_set_table = wandb.Table(data=e_returns*env.scale[None], columns=[f'o_{o}' for o in range(e_returns.shape[1])])
-            nd_executions_table = wandb.Table(data=e_r.mean(axis=1)*env.scale[None], columns=[f'o_{o}' for o in range(e_returns.shape[1])])
+            # nd_coverage_set_table = wandb.Table(data=e_returns*env.scale[None], columns=[f'o_{o}' for o in range(e_returns.shape[1])])
+            # nd_executions_table = wandb.Table(data=e_r.mean(axis=1)*env.scale[None], columns=[f'o_{o}' for o in range(e_returns.shape[1])])
             
-            executions_transitions = wandb.Artifact(
-                f'run-{wandb.run.id}-execution-transitions', type='transitions'
-            )
-            with executions_transitions.new_file('transitions.pkl', 'wb') as f:
-                pickle.dump(t_r, f)
-
-            wandb.log({
-                'coverage_set': coverage_set_table,
-                'nd_coverage_set': nd_coverage_set_table,
-                'executions': nd_executions_table,
-                'eps_max': epsilon.max(),
-                'eps_mean': epsilon.mean(),
-            }, step=step)
-            wandb.run.log_artifact(executions_transitions)
+            # executions_transitions = wandb.Artifact(
+            #     f'run-{wandb.run.id}-execution-transitions', type='transitions'
+            # )
+            # with executions_transitions.new_file('transitions.pkl', 'wb') as f:
+            #     pickle.dump(t_r, f)
+            #
+            # wandb.log({
+            #     'coverage_set': coverage_set_table,
+            #     'nd_coverage_set': nd_coverage_set_table,
+            #     'executions': nd_executions_table,
+            #     'eps_max': epsilon.max(),
+            #     'eps_mean': epsilon.mean(),
+            # }, step=step)
+            # wandb.run.log_artifact(executions_transitions)

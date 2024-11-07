@@ -1,5 +1,5 @@
-from gymnasium.envs.registration import register
-from gymnasium.wrappers import TimeLimit
+from gym.envs.registration import register
+from gym.wrappers import TimeLimit
 from gym_covid.envs.model import ODEModel, BinomialModel
 from gym_covid.envs.epi_env import EpiEnv
 from gym_covid.envs.discrete_actions import DiscreteAction
@@ -8,10 +8,9 @@ from gym_covid.envs.budget_actions import BudgetActionWrapper
 import numpy as np
 import pandas as pd
 import json
-from pathlib import Path
-from importlib_resources import files, as_file
+from importlib_resources import files
 import datetime
-import gymnasium as gym
+import gym
 
 
 def be_config():
@@ -68,7 +67,7 @@ class TimestepsLeft(gym.ObservationWrapper):
 
     def observation(self, observation):
         # assume useage of TimeLimit
-        timesteps_left = self.env._max_episode_steps - self.env._elapsed_steps
+        timesteps_left = self.env.env._max_episode_steps - self.env.env._elapsed_steps
         return ([timesteps_left],) + observation
 
 
@@ -121,17 +120,14 @@ class EndPenalty(gym.Wrapper):
 def create_env(env_type='ODE', discrete_actions=False, simulate_lockdown=True, until=None, budget=None):
     if env_type == 'ODE':
         env = be_ode()
-        print(env.today)
     else:
         env = be_binomial()
     # set timelimit
     if until is not None:
-        print("until")
         env = until(env)
         env = EndPenalty(env)
         if budget is None:
             env = TimestepsLeft(env)
-            print("2", env.today)
     if simulate_lockdown:
         env = Lockdown(env)
     if budget is not None:

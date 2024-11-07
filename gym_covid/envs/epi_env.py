@@ -1,6 +1,6 @@
 import numpy as np
-import gymnasium as gym
-from gymnasium.spaces import Box
+import gym
+from gym.spaces import Box
 import datetime
 
 
@@ -67,7 +67,7 @@ class EpiEnv(gym.Env):
         self.today = datetime.date(2020, 3, 1)
         # check for events on this day
         event = self.today in self.events
-        print(self.model.current_state)
+        #print(self.model.current_state)
         return self.model.current_state, event, np.zeros(3)
 
     def step(self, action):
