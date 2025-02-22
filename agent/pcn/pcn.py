@@ -23,7 +23,7 @@ def crowding_distance(points, ranks=None):
             crowding[current_i] = 1
             continue
         # first normalize accross dimensions
-        current = (current-current.min(axis=0))/(current.ptp(axis=0)+1e-8)
+        current = (current - current.min(axis=0)) / (current.ptp(axis=0) + 1e-8)
         # sort points per dimension
         dim_sorted = np.argsort(current, axis=0)
         point_sorted = np.take_along_axis(current, dim_sorted, axis=0)
@@ -31,14 +31,14 @@ def crowding_distance(points, ranks=None):
         distances = np.abs(point_sorted[:-2] - point_sorted[2:])
         # pad extrema's with 1, for each dimension
         distances = np.pad(distances, ((1,), (0,)), constant_values=1)
-        
+
         current_crowding = np.zeros(current.shape)
         current_crowding[dim_sorted, np.arange(points.shape[-1])] = distances
         crowding[current_i] = current_crowding
     # sum distances of each dimension of the same point
     crowding = np.sum(crowding, axis=-1)
     # normalized by dividing by number of objectives
-    crowding = crowding/points.shape[-1]
+    crowding = crowding / points.shape[-1]
     return crowding
 
 
@@ -48,7 +48,7 @@ def non_dominated_rank(points):
     # get unique points to determine their non-dominated rank
     unique_points, indexes = np.unique(points, return_inverse=True, axis=0)
     # as long as we haven't processed all points
-    while not np.all(unique_points==-np.inf):
+    while not np.all(unique_points == -np.inf):
         _, nd_i = non_dominated(unique_points, return_indexes=True)
         # use indexes to compute inverse of unique_points, but use nd_i instead
         ranks[nd_i[indexes]] = current_rank
@@ -60,15 +60,15 @@ def non_dominated_rank(points):
 
 def epsilon_metric(coverage_set, pareto_front):
     # normalize pareto front and coverage set for each 
-    min_, ptp = pareto_front.min(axis=0),pareto_front.ptp(axis=0)
-    pareto_front = (pareto_front-min_)/(ptp+1e-8)
-    coverage_set = (coverage_set-min_)/(ptp+1e-8)
+    min_, ptp = pareto_front.min(axis=0), pareto_front.ptp(axis=0)
+    pareto_front = (pareto_front - min_) / (ptp + 1e-8)
+    coverage_set = (coverage_set - min_) / (ptp + 1e-8)
     # for every point in the pareto front, find the closest point in the coverage set
     # do this for every dimension separately
     # duplicate every point of the PF to compare with every point of the CS
     pf_duplicate = np.tile(np.expand_dims(pareto_front, 1), (1, len(coverage_set), 1))
     # distance for each dimension, for each point
-    epsilon = np.abs(pf_duplicate-coverage_set)
+    epsilon = np.abs(pf_duplicate - coverage_set)
     # for each point, take the maximum epsilon with pareto front
     epsilon = epsilon.max(-1)
     # closest point (in terms of epsilon) with PF
@@ -85,7 +85,9 @@ class Transition(object):
     next_observation: np.ndarray
     terminal: bool
 
+
 device = 'cpu'
+
 
 def non_dominated(solutions, return_indexes=False):
     is_efficient = np.ones(solutions.shape[0], dtype=bool)
@@ -110,8 +112,9 @@ def compute_hypervolume(q_set, ref):
         points = np.array(q_set[i]) * -1.
         hv = hypervolume(points)
         # use negative ref-point for minimization
-        q_values[i] = hv.compute(ref*-1)
+        q_values[i] = hv.compute(ref * -1)
     return q_values
+
 
 def nlargest(n, experience_replay, objectives, threshold=.2):
     returns = np.array([e[2][0].reward for e in experience_replay])
@@ -127,7 +130,7 @@ def nlargest(n, experience_replay, objectives, threshold=.2):
     # duplicate each point with number of nd to compute respective distance
     returns_exp = np.tile(np.expand_dims(returns, 1), (1, len(nd), 1))
     # distance to closest nd point
-    l2 = np.min(np.linalg.norm(returns_exp-nd, axis=-1), axis=-1)*-1
+    l2 = np.min(np.linalg.norm(returns_exp - nd, axis=-1), axis=-1) * -1
     # all points that are too close together (crowding distance < threshold) get a penalty
     nd_i = np.nonzero(nd_i)[0]
     _, unique_i = np.unique(nd, axis=0, return_index=True)
@@ -145,10 +148,11 @@ def nlargest(n, experience_replay, objectives, threshold=.2):
     heapq.heapify(experience_replay)
     return largest
 
+
 def add_episode(transitions, experience_replay, gamma=1., max_size=100, step=0):
     # compute return
-    for i in reversed(range(len(transitions)-1)):
-        transitions[i].reward += gamma * transitions[i+1].reward
+    for i in reversed(range(len(transitions) - 1)):
+        transitions[i].reward += gamma * transitions[i + 1].reward
     # pop smallest episode of heap if full, add new episode
     # heap is sorted by negative distance, (updated in nlargest)
     # put positive number to ensure that new item stays in the heap
@@ -156,6 +160,7 @@ def add_episode(transitions, experience_replay, gamma=1., max_size=100, step=0):
         heapq.heappushpop(experience_replay, (1, step, transitions))
     else:
         heapq.heappush(experience_replay, (1, step, transitions))
+
 
 def choose_action(model, obs, desired_return, desired_horizon, eval=False):
     # if observation is not a simple np.array, convert individual arrays to tensors
@@ -181,6 +186,7 @@ def choose_action(model, obs, desired_return, desired_horizon, eval=False):
             action = np.array(list([np.random.choice(np.arange(len(lp)), p=np.exp(lp)) for lp in log_probs]))
     return action
 
+
 def run_episode(env, model, desired_return, desired_horizon, max_return, eval=False):
     transitions = []
     obs = env.reset()
@@ -199,21 +205,22 @@ def run_episode(env, model, desired_return, desired_horizon, max_return, eval=Fa
         obs = n_obs
         # clip desired return, to return-upper-bound, 
         # to avoid negative returns giving impossible desired returns
-        desired_return = np.clip(desired_return-reward, None, max_return, dtype=np.float32)
+        desired_return = np.clip(desired_return - reward, None, max_return, dtype=np.float32)
         # clip desired horizon to avoid negative horizons
-        desired_horizon = np.float32(max(desired_horizon-1, 1.))
+        desired_horizon = np.float32(max(desired_horizon - 1, 1.))
     return transitions
+
 
 def choose_commands(experience_replay, n_episodes, objectives, threshold=0.2):
     # get best episodes, according to their crowding distance
-    episodes = nlargest(n_episodes, experience_replay, objectives ,threshold=threshold)
+    episodes = nlargest(n_episodes, experience_replay, objectives, threshold=threshold)
     returns, horizons = list(zip(*[(e[2][0].reward, len(e[2])) for e in episodes]))
     # keep only non-dominated returns
     returns, nd_i = non_dominated(np.array(returns), return_indexes=True)
     horizons = np.array(horizons)[nd_i]
     # pick random return from random best episode
     r_i = np.random.randint(0, len(returns))
-    desired_horizon = np.float32(horizons[r_i]-2)
+    desired_horizon = np.float32(horizons[r_i] - 2)
     # mean and std per objective
     m, s = np.mean(returns, axis=0), np.std(returns, axis=0)
     # desired return is sampled from [M, M+S], to try to do better than mean return
@@ -223,6 +230,7 @@ def choose_commands(experience_replay, n_episodes, objectives, threshold=0.2):
     desired_return[r_i] += np.random.uniform(high=s[r_i])
     desired_return = np.float32(desired_return)
     return desired_return, desired_horizon
+
 
 def update_model(model, opt, experience_replay, batch_size, noise=0.):
     batch = []
@@ -235,7 +243,7 @@ def update_model(model, opt, experience_replay, batch_size, noise=0.):
         # use it's return and leftover timesteps as desired return and horizon
         t = np.random.randint(0, len(ep))
         # reward contains return until end of episode
-        s_t, a_t, r_t, h_t = ep[t].observation, ep[t].action, np.float32(ep[t].reward), np.float32(len(ep)-t)
+        s_t, a_t, r_t, h_t = ep[t].observation, ep[t].action, np.float32(ep[t].reward), np.float32(len(ep) - t)
         batch.append((s_t, a_t, r_t, h_t))
 
     obs, actions, desired_return, desired_horizon = zip(*batch)
@@ -244,7 +252,8 @@ def update_model(model, opt, experience_replay, batch_size, noise=0.):
     obs = tuple([torch.tensor(o).to(device) for o in obs])
     # TODO TEST add noise to the desired return
     desired_return = torch.tensor(desired_return).to(device)
-    desired_return = desired_return + noise*torch.normal(0, 1, size=desired_return.shape, device=desired_return.device)
+    desired_return = desired_return + noise * torch.normal(0, 1, size=desired_return.shape,
+                                                           device=desired_return.device)
     log_prob = model(obs,
                      desired_return,
                      torch.tensor(desired_horizon).unsqueeze(1).to(device))
@@ -253,13 +262,15 @@ def update_model(model, opt, experience_replay, batch_size, noise=0.):
     # check if actions are continuous
     # TODO hacky
     if model.__class__.__name__ == 'ContinuousHead':
+        print("l", len(log_prob[0]), len(log_prob[1]))
+        print("a", len(actions[0]), len(actions[1]))
         l = F.mse_loss(log_prob, torch.tensor(actions))
     else:
         # one-hot of action for CE loss
         actions = torch.tensor(actions).long().to(device)
         actions = F.one_hot(actions, num_classes=log_prob.shape[-1])
         # cross-entropy loss
-        l = torch.sum(-actions*log_prob, -1).sum(-1)
+        l = torch.sum(-actions * log_prob, -1).sum(-1)
     l = l.mean()
     l.backward()
     opt.step()
@@ -275,8 +286,8 @@ def eval_(env, model, coverage_set, horizons, max_return, gamma=1., n=10):
         for n_i in range(n):
             transitions = run_episode(env, model, target_return, np.float32(horizon), max_return, eval=True)
             # compute return
-            for i in reversed(range(len(transitions)-1)):
-                transitions[i].reward += gamma * transitions[i+1].reward
+            for i in reversed(range(len(transitions) - 1)):
+                transitions[i].reward += gamma * transitions[i + 1].reward
             e_returns[e_i, n_i] = transitions[0].reward
             n_transitions.append(transitions)
         all_transitions.append(n_transitions)
@@ -284,10 +295,10 @@ def eval_(env, model, coverage_set, horizons, max_return, gamma=1., n=10):
     return e_returns, all_transitions
 
 
-def train(env, 
+def train(env,
           model,
           learning_rate=1e-2,
-          batch_size=1024, 
+          batch_size=1024,
           total_steps=1e7,
           n_model_updates=100,
           n_step_episodes=10,
@@ -329,22 +340,23 @@ def train(env,
             l, lp = update_model(model, opt, experience_replay, batch_size=batch_size)
             loss.append(l.detach().cpu().numpy())
             lp = lp.detach().cpu().numpy()
-            ent = np.sum(-np.exp(lp)*lp)
+            ent = np.sum(-np.exp(lp) * lp)
             entropy.append(ent)
 
         desired_return, desired_horizon = choose_commands(experience_replay, n_er_episodes, objectives)
-        #exit()
-         # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
-        #print(experience_replay)
+        # exit()
+        # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
+        # print(experience_replay)
         e_lengths, e_returns = [(len(e[2])) for e in experience_replay[len(experience_replay) // 2:]], \
                                [(e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]]
         e_lengths, e_returns = np.array(e_lengths), np.array(e_returns)
         try:
             if len(experience_replay) == max_size:
                 logger.put('train/leaves', e_returns, step, f'{e_returns.shape[-1]}d')
-            # hv = hypervolume(e_returns[...,objectives]*-1)
+            hv = hypervolume(e_returns[..., objectives] * -1)
+            hv_est = hv.compute(ref_point[np.array(objectives)] * -1)
             # hv_est = hv.compute(ref_point[objectives]*-1)
-            # logger.put('train/hypervolume', hv_est, step, 'scalar')
+            logger.put('train/hypervolume', hv_est, step, 'scalar')
             # wandb.log({'hypervolume': hv_est}, step=step)
         except ValueError:
             pass
@@ -357,22 +369,25 @@ def train(env,
             add_episode(transitions, experience_replay, gamma=gamma, max_size=max_size, step=step)
             returns.append(transitions[0].reward)
             horizons.append(len(transitions))
-        
+
         total_episodes += n_step_episodes
         logger.put('train/episode', total_episodes, step, 'scalar')
         logger.put('train/loss', np.mean(loss), step, 'scalar')
         logger.put('train/entropy', np.mean(entropy), step, 'scalar')
         logger.put('train/horizon/desired', desired_horizon, step, 'scalar')
-        logger.put('train/horizon/distance', np.linalg.norm(np.mean(horizons)-desired_horizon), step, 'scalar')
+        logger.put('train/horizon/distance', np.linalg.norm(np.mean(horizons) - desired_horizon), step, 'scalar')
         for o in range(len(desired_return)):
             logger.put(f'train/return/{o}/value', desired_horizon, step, 'scalar')
             logger.put(f'train/return/{o}/desired', np.mean(np.array(returns)[:, o]), step, 'scalar')
-            logger.put(f'train/return/{o}/distance', np.linalg.norm(np.mean(np.array(returns)[:, o])-desired_return[o]), step, 'scalar')
-        print(f'step {step} \t return {np.mean(returns, axis=0)}, ({np.std(returns, axis=0)}) \t loss {np.mean(loss):.3E}')
-        
+            logger.put(f'train/return/{o}/distance',
+                       np.linalg.norm(np.mean(np.array(returns)[:, o]) - desired_return[o]), step, 'scalar')
+        print(
+            f'step {step} \t return {np.mean(returns, axis=0)}, ({np.std(returns, axis=0)}) \t loss {np.mean(loss):.3E}')
+
         # compute hypervolume of leaves
-        valid_e_returns = e_returns[np.all(e_returns[:,objectives] >= ref_point[objectives,], axis=1)]
-        hv = compute_hypervolume(np.expand_dims(valid_e_returns[:,objectives], 0), ref_point[objectives,])[0] if len(valid_e_returns) else 0
+        valid_e_returns = e_returns[np.all(e_returns[:, objectives] >= ref_point[objectives,], axis=1)]
+        hv = compute_hypervolume(np.expand_dims(valid_e_returns[:, objectives], 0), ref_point[objectives,])[0] if len(
+            valid_e_returns) else 0
 
         # wandb.log({
         #     'episode': total_episodes,
@@ -382,14 +397,14 @@ def train(env,
         #     'hypervolume': hv,
         # }, step=step)
 
-        if step >= (n_checkpoints+1)*total_steps/10:
-            torch.save(model, f'{logger.logdir}/model_{n_checkpoints+1}.pt')
+        if step >= (n_checkpoints + 1) * total_steps / 10:
+            torch.save(model, f'{logger.logdir}/model_{n_checkpoints + 1}.pt')
             n_checkpoints += 1
 
             coverage_set_table = wandb.Table(data=e_returns, columns=[f'o_{o}' for o in range(e_returns.shape[1])])
 
             # current coverage set
-            _, e_i = non_dominated(e_returns[:,objectives], return_indexes=True)
+            _, e_i = non_dominated(e_returns[:, objectives], return_indexes=True)
             e_returns = e_returns[e_i]
             e_lengths = e_lengths[e_i]
 
@@ -397,18 +412,18 @@ def train(env,
             # save raw evaluation returns
             logger.put(f'eval/returns/{n_checkpoints}', e_r, 0, f'{len(e_r)}d')
             # compute e-metric
-            epsilon = epsilon_metric(e_r[...,objectives].mean(axis=1), e_returns[...,objectives])
+            epsilon = epsilon_metric(e_r[..., objectives].mean(axis=1), e_returns[..., objectives])
             logger.put('eval/epsilon/max', epsilon.max(), step, 'scalar')
             logger.put('eval/epsilon/mean', epsilon.mean(), step, 'scalar')
-            print('='*10, ' evaluation ', '='*10)
+            print('=' * 10, ' evaluation ', '=' * 10)
             for d, r in zip(e_returns, e_r):
                 print('desired: ', d, '\t', 'return: ', r.mean(0))
             print(f'epsilon max/mean: {epsilon.max():.3f} \t {epsilon.mean():.3f}')
-            print('='*22)
+            print('=' * 22)
 
             # nd_coverage_set_table = wandb.Table(data=e_returns*env.scale[None], columns=[f'o_{o}' for o in range(e_returns.shape[1])])
             # nd_executions_table = wandb.Table(data=e_r.mean(axis=1)*env.scale[None], columns=[f'o_{o}' for o in range(e_returns.shape[1])])
-            
+
             # executions_transitions = wandb.Artifact(
             #     f'run-{wandb.run.id}-execution-transitions', type='transitions'
             # )

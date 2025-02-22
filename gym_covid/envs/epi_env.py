@@ -2,6 +2,7 @@ import numpy as np
 import gym
 from gym.spaces import Box
 import datetime
+import pandas as pd
 
 
 def gradual_compliance_weights(t, beta_0, beta_1):
@@ -17,7 +18,6 @@ def school_holidays(C, C_current, C_target):
     C_current[3] = C_current[3]*0.
     C_target[3] = C_target[3]*0.
     return C, C_current, C_target
-
 
 class EpiEnv(gym.Env):
 
@@ -61,6 +61,10 @@ class EpiEnv(gym.Env):
 
         self.previous_state = None
 
+        self.C_diff_fairness = None
+
+
+
     def reset(self):
         self.model.current_state = self.model.init_state.copy()
         self.current_C = self.C
@@ -85,6 +89,7 @@ class EpiEnv(gym.Env):
         r_ari = r_arh = r_sr = 0.
         state_n = np.empty((self.days_per_timestep,) + self.observation_space.shape)
         event_n = np.zeros((self.days_per_timestep, 1), dtype=bool)
+
         for day in range(self.days_per_timestep):
             # every day check if there are events on the calendar
             today = self.today + datetime.timedelta(days=day)
@@ -118,9 +123,18 @@ class EpiEnv(gym.Env):
             i, j = np.meshgrid(range(self.K), range(self.K))
             C_diff = C_asym-C_full
             # divide by total population to get lost contacts/person, for each social environment
-            r_sr += (C_diff*S_s_n[None,i]*S_s_n[None,j] + C_diff*R_s_n[None,i]*R_s_n[None,j]).sum(axis=(1,2))/self.N
+            r_sr += (C_diff*S_s_n[None, i]*S_s_n[None, j] + C_diff*R_s_n[None, i]*R_s_n[None, j]).sum(axis=(1, 2))/self.N
+
             # update state
             s = s_n
+
+            h = self.model.get_hospitalization_risk()
+
+            S = s[0, :]
+            R = s[8, :]
+
+            # C_diff added so it can be accessed for fairness
+            self.C_diff_fairness = C_diff
 
         # update current contact matrix
         self.current_C = C_target
@@ -153,4 +167,25 @@ class EpiEnv(gym.Env):
         # print("true_action:", true_action)
         # print("score:", score)
         # print("reward:", reward)
-        return [(state, action, true_action, score, reward)]
+
+        state_df = self.state_df()
+        return [(state_df, action, true_action, score, reward)]
+
+    def state_df(self):
+        compartments = [
+            "S", "E", "I_presym", "I_asym", "I_mild", "I_sev",
+            "I_hosp", "I_icu", "R", "D", "I_hosp_new", "I_icu_new", "D_new",
+        ]
+
+        age_groups = ["[0, 10[", "[10, 20[", "[20, 30[", "[30, 40[", "[40, 50[", "[50, 60[", "[60, 70[", "[70, 80[",
+                      "[80, 90[", "[90, inf["]
+
+        df = pd.DataFrame(data=self.model.current_state, index=compartments).T
+
+        df.index = age_groups
+
+        h = self.model.get_hospitalization_risk()
+        df["h_risk"] = h
+        df["day"] = self.today
+
+        return df, self.C_diff_fairness

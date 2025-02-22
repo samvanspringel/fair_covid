@@ -9,7 +9,7 @@ sys.path.append("./")  # for command-line execution to find the other packages (
 from agent.pcn.pcn_core import epsilon_metric, non_dominated, compute_hypervolume, add_episode, Transition
 from agent.pcn.pcn import choose_commands
 from agent.pcn.logger import Logger
-from create_fair_env import *
+from scenario.create_fair_env import *
 from fairness.fairness_framework import ExtendedfMDP
 from loggers.logger import AgentLogger, LeavesLogger, TrainingPCNLogger, EvalLogger
 from scenario.fraud_detection.env import NUM_FRAUD_FEATURES
@@ -154,7 +154,8 @@ def multidiscrete_env(env):
 
 
 def run_episode_fairness(env, model, desired_return, desired_horizon, max_return, agent_logger, current_ep, current_t,
-                         eval=False, normalise_state=False, eval_axes=False, log_compact=False):
+                         eval=False, normalise_state=False, eval_axes=False,
+                         log_compact=False, log_coverage_set_only=False):
     curr_t = time.time()
     transitions = []
     obs = env.reset()
@@ -185,6 +186,7 @@ def run_episode_fairness(env, model, desired_return, desired_horizon, max_return
             next_observation=next_obs if normalise_state else next_obs.to_array(),
             terminal=done
         ))
+
         obs = n_obs
         # clip desired return, to return-upper-bound,
         # to avoid negative returns giving impossible desired returns
@@ -193,20 +195,20 @@ def run_episode_fairness(env, model, desired_return, desired_horizon, max_return
         desired_horizon = np.float32(max(desired_horizon - 1, 1.))
         #
         next_t = time.time()
-        if not eval_axes or not (eval and log_compact):
+        if not eval_axes or log_coverage_set_only or not (eval and log_compact):
             log_entries.append(
                 agent_logger.create_entry(current_ep, t, obs, action, reward, done, info, next_t - curr_t,
                                           status))
         curr_t = next_t
         t += 1
 
-    if eval or not log_compact:
+    if eval or not (log_compact or log_coverage_set_only):
         agent_logger.write_data(log_entries, path)
     return transitions
 
 
 def eval_(env, model, coverage_set, horizons, max_return, agent_logger, current_ep, current_t, gamma=1., n=10,
-          normalise_state=False, eval_axes=False, log_compact=False):
+          normalise_state=False, eval_axes=False, log_compact=False, log_coverage_set_only=False):
     e_returns = np.empty((coverage_set.shape[0], n, coverage_set.shape[-1]))
     all_transitions = []
     for e_i, target_return, horizon in zip(np.arange(len(coverage_set)), coverage_set, horizons):
@@ -214,7 +216,8 @@ def eval_(env, model, coverage_set, horizons, max_return, agent_logger, current_
         for n_i in range(n):
             transitions = run_episode_fairness(env, model, target_return, np.float32(horizon), max_return, agent_logger,
                                                current_ep, current_t, eval=True, normalise_state=normalise_state,
-                                               eval_axes=eval_axes, log_compact=log_compact)
+                                               eval_axes=eval_axes, log_compact=log_compact,
+                                               log_coverage_set_only=log_coverage_set_only)
             # compute return
             for i in reversed(range(len(transitions) - 1)):
                 transitions[i].reward += gamma * transitions[i + 1].reward
@@ -238,7 +241,7 @@ def update_model(model, opt, experience_replay, batch_size, noise=0.):
         # print(ep[t])
         # exit()
         # reward contains return until end of episode
-        s_t, a_t, r_t, h_t = ep[t].observation, ep[t].action, np.float32(ep[t].reward), np.float32(len(ep) - t)
+        s_t, a_t, r_t, h_t = ep[t].observation, ep[t].action, np.float32(ep[t].reward), np.float32(len(ep) - t) # Left over time in horizon
         batch.append((s_t, a_t, r_t, h_t))
 
     obs, actions, desired_return, desired_horizon = zip(*batch)
@@ -269,6 +272,31 @@ def update_model(model, opt, experience_replay, batch_size, noise=0.):
     opt.step()
 
     return l, log_prob
+
+
+def choose_action(model, obs, desired_return, desired_horizon, eval=False):
+    # if observation is not a simple np.array, convert individual arrays to tensors
+    obs = [torch.tensor([o]).to(device) for o in obs] if type(obs) == tuple else torch.tensor([obs]).to(device)
+    log_probs = model(obs,
+                      torch.tensor([desired_return]).to(device),
+                      torch.tensor([desired_horizon]).unsqueeze(1).to(device))
+    log_probs = log_probs.detach().cpu().numpy()[0]
+    # check if actions are continuous
+    # TODO hacky
+    if model.__class__.__name__ == 'ContinuousHead':
+        action = log_probs
+        # add some noise for randomness
+        if not eval:
+            action = np.clip(action + np.random.normal(0, 0.1, size=action.shape).astype(np.float32), 0, 1)
+    else:
+        # if evaluating: act greedily
+        if eval:
+            return np.argmax(log_probs, axis=-1)
+        if log_probs.ndim == 1:
+            action = np.random.choice(np.arange(len(log_probs)), p=np.exp(log_probs))
+        elif log_probs.ndim == 2:
+            action = np.array(list([np.random.choice(np.arange(len(lp)), p=np.exp(lp)) for lp in log_probs]))
+    return action
 
 
 def choose_action_hire(model, obs, desired_return, desired_horizon, eval=False, return_probs=False):
@@ -310,31 +338,6 @@ def choose_action_hire(model, obs, desired_return, desired_horizon, eval=False, 
         return action
 
 
-def choose_action(model, obs, desired_return, desired_horizon, eval=False):
-    # if observation is not a simple np.array, convert individual arrays to tensors
-    obs = [torch.tensor([o]).to(device) for o in obs] if type(obs) == tuple else torch.tensor([obs]).to(device)
-    log_probs = model(obs,
-                      torch.tensor([desired_return]).to(device),
-                      torch.tensor([desired_horizon]).unsqueeze(1).to(device))
-    log_probs = log_probs.detach().cpu().numpy()[0]
-    # check if actions are continuous
-    # TODO hacky
-    if model.__class__.__name__ == 'ContinuousHead':
-        action = log_probs
-        # add some noise for randomness
-        if not eval:
-            action = np.clip(action + np.random.normal(0, 0.1, size=action.shape).astype(np.float32), 0, 1)
-    else:
-        # if evaluating: act greedily
-        if eval:
-            return np.argmax(log_probs, axis=-1)
-        if log_probs.ndim == 1:
-            action = np.random.choice(np.arange(len(log_probs)), p=np.exp(log_probs))
-        elif log_probs.ndim == 2:
-            action = np.array(list([np.random.choice(np.arange(len(lp)), p=np.exp(lp)) for lp in log_probs]))
-    return action
-
-
 def train_fair(env,
                model,
                learning_rate=1e-2,
@@ -355,6 +358,7 @@ def train_fair(env,
                normalise_state=False,
                use_wandb=True,
                log_compact=False,
+               log_coverage_set_only=False,
                ):
     step = 0
     if objectives == None:
@@ -371,16 +375,17 @@ def train_fair(env,
     pcn_logger = TrainingPCNLogger(objectives=all_obj)
     eval_logger = EvalLogger(objectives=all_obj)
 
-    # TODO: replace by list of timesteps and actions to recreate interactions?
     # agent_logger.create_file(agent_logger.path_eval_axes)
-    agent_logger.create_file(agent_logger.path_eval)
-    if not log_compact:
+    if not log_coverage_set_only:
+        agent_logger.create_file(agent_logger.path_eval)
+    if not (log_compact or log_coverage_set_only):
         agent_logger.create_file(agent_logger.path_train)
         agent_logger.create_file(agent_logger.path_experience)
 
     # leaves_logger.create_file(f"{logdir}/leaves_log.csv")
     pcn_logger.create_file(f"{logdir}/pcn_log.csv")
-    eval_logger.create_file(f"{logdir}/eval_log.csv")
+    if not log_coverage_set_only:
+        eval_logger.create_file(f"{logdir}/eval_log.csv")
     n_checkpoints = 0
 
     # fill buffer with random episodes
@@ -394,19 +399,12 @@ def train_fair(env,
         obs = env.reset()
         done = False
         while not done:
-            # print("initial state", obs)
             curr_obs = env.normalise_state(obs) if normalise_state else obs
             #action = np.random.randint(0, env.nA)
             action = env.action_space.sample()
             n_obs, reward, done, info = env.step(action, scores=np.full(env.nA, fill_value=1 / env.nA))
             next_obs = env.normalise_state(n_obs) if normalise_state else n_obs
-
-            # TODO FAIRNESS
-
-            fairness = env.fairness_framework.check_fairness()
-            print(fairness)
-
-
+            # TODO
             if step % 100 == 0:
                 print("t=", step, ep, action, reward)
 
@@ -415,7 +413,7 @@ def train_fair(env,
                            next_obs if normalise_state else next_obs.to_array(), done))
             next_t = time.time()
 
-            if not log_compact:
+            if not (log_compact or log_coverage_set_only):
                 log_entries.append(agent_logger.create_entry(ep, step, obs, action, reward, done, info, next_t - curr_t,
                                                              status="e_replay"))
             curr_t = next_t
@@ -425,7 +423,7 @@ def train_fair(env,
         # add episode in-place
         print(f"Store episode {ep}, t {step}")
         add_episode(transitions, experience_replay, gamma=gamma, max_size=max_size, step=step)
-        if not log_compact:
+        if not (log_compact or log_coverage_set_only):
             agent_logger.write_data(log_entries, agent_logger.path_experience)
 
     del log_entries
@@ -433,28 +431,24 @@ def train_fair(env,
     # return  # TODO
     print("Training...")
     update_num = 0
+    print_update_interval = 5
 
     while step < total_steps:
-        print("loop", update_num)
+        if update_num % print_update_interval == 0:
+            print("loop", update_num)
+
         loss = []
         entropy = []
+        print("Updating model...")
         for _ in range(n_model_updates):
             l, lp = update_model(model, opt, experience_replay, batch_size=batch_size)
             loss.append(l.detach().cpu().numpy())
             lp = lp.detach().cpu().numpy()
             ent = np.sum(-np.exp(lp) * lp)
             entropy.append(ent)
-        print("model updates", update_num)
 
         desired_return, desired_horizon = choose_commands(experience_replay, n_er_episodes, objectives)
 
-        # exit()
-        # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
-        # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
-        # leaves = np.array([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
-        # e_lengths, e_returns = zip(*leaves)
-        # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
-        # leaves = np.array([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
         e_lengths, e_returns = [(len(e[2])) for e in experience_replay[len(experience_replay) // 2:]], \
                                [(e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]]
         e_lengths, e_returns = np.array(e_lengths), np.array(e_returns)
@@ -464,6 +458,14 @@ def train_fair(env,
                     logger.put('train/leaves', e_returns, step, f'{e_returns.shape[-1]}d')
                 else:
                     leaves = []
+                    # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
+                    # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
+                    # leaves = np.array([(len(e[2]), e[2][0].reward)
+                    #                    for e in experience_replay[len(experience_replay) // 2:]])
+                    # e_lengths, e_returns = zip(*leaves)
+                    # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
+                    # leaves = np.array([(len(e[2]), e[2][0].reward)
+                    #                    for e in experience_replay[len(experience_replay) // 2:]])
                     # for er in e_returns:
                     #     leaves.append(leaves_logger.create_entry(ep, step, er))
                     # leaves_logger.write_data(leaves)
@@ -479,15 +481,15 @@ def train_fair(env,
         for _ in range(n_step_episodes):
             transitions = run_episode_fairness(env, model, desired_return, desired_horizon, max_return, agent_logger,
                                                normalise_state=normalise_state, current_t=step, current_ep=ep,
-                                               log_compact=log_compact)
+                                               log_compact=log_compact, log_coverage_set_only=log_coverage_set_only)
             step += len(transitions)
             ep += 1
             add_episode(transitions, experience_replay, gamma=gamma, max_size=max_size, step=step)
             returns.append(transitions[0].reward)
             horizons.append(len(transitions))
 
-        print(f'step {step} \t return {np.mean(returns, axis=0)}, ({np.std(returns, axis=0)}) '
-              f'\t loss {np.mean(loss):.3E}')
+        print(f'step {step}/{int(total_steps)} ({round((step + 1) / total_steps * 100, 3)}%) '
+              f'\t return {np.mean(returns, axis=0)}, ({np.std(returns, axis=0)}) \t loss {np.mean(loss):.3E}')
 
         # compute hypervolume of leaves
         valid_e_returns = e_returns[np.all(e_returns[:, objectives] >= ref_point[objectives,], axis=1)]
@@ -521,17 +523,18 @@ def train_fair(env,
 
             # compute e-metric
             epsilon = epsilon_metric(e_r[..., objectives].mean(axis=1), e_returns[..., objectives])
-            print('=' * 10, ' evaluation ', '=' * 10)
+            print('\n', '=' * 10, f' evaluation (t={step}) ', '=' * 10, sep='')
             for d, r in zip(e_returns, e_r):
                 print('desired: ', d, '\t', 'return: ', r.mean(0))
             print(f'epsilon max/mean: {epsilon.max():.3f} \t {epsilon.mean():.3f}')
-            print('=' * 22)
+            print('=' * 22, '\n', sep='')
 
-            entries = []
-            for d, r in zip(e_returns, e_r):
-                entry = eval_logger.create_entry(ep, step, epsilon.max(), epsilon.mean(), d, r.mean(0), "eval")
-                entries.append(entry)
-            eval_logger.write_data(entries)
+            if not (log_compact or log_coverage_set_only):
+                entries = []
+                for d, r in zip(e_returns, e_r):
+                    entry = eval_logger.create_entry(ep, step, epsilon.max(), epsilon.mean(), d, r.mean(0), "eval")
+                    entries.append(entry)
+                eval_logger.write_data(entries)
 
         update_num += 1
 
@@ -543,17 +546,18 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='PCN-Fair', formatter_class=argparse.RawDescriptionHelpFormatter,
                                      parents=[fMDP_parser])
+    parser.add_argument('--action', default='continuous', type=str, help='discrete, multidiscrete or continuous')
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
     parser.add_argument('--steps', default=1e5, type=float, help='total timesteps')
     parser.add_argument('--batch', default=256, type=int, help='batch size')
     parser.add_argument('--model-updates', default=20, type=int,
                         help='number of times the model is updated at every training iteration')
-    parser.add_argument('--top-episodes', default=50, type=int,
-                        help='top-n episodes used to compute target-return and horizon. \
-              Initially fill ER with n random episodes')
+    parser.add_argument('--top-episodes', default=200, type=int,
+                        help='top-n episodes used to compute target-return and horizon. '
+                             'Initially fill ER with n random episodes')
     parser.add_argument('--n-episodes', default=10, type=int,
                         help='number of episodes to run between each training iteration')
-    parser.add_argument('--er-size', default=100, type=int,
+    parser.add_argument('--er-size', default=1000, type=int,
                         help='max size (in episodes) of the ER buffer')
     parser.add_argument('--threshold', default=0.02, type=float, help='crowding distance threshold before penalty')
     parser.add_argument('--noise', default=0.0, type=float, help='noise applied on target-return on batch-update')
@@ -565,45 +569,50 @@ if __name__ == '__main__':
 
     # ########
     # args.vsc = 0
-    # #
-    # args.steps = 10000  # TODO
+    #
+    # args.steps = 10000
     # args.window = 1000
     # args.team_size = 100
     # args.episode_length = args.team_size * 10
     # args.env = "fraud"
     # args.n_transactions = 200
     # args.fraud_proportion = 0.20
-    # # #
-    args.top_episodes = 50  # TODO
-    args.steps = 1e4  # TODO
-    # args.n_episodes = 25
+    #
+    # args.top_episodes = 15
+    # args.n_episodes = 15
     # args.er_size = 200
-    args.model_updates = 10
-    # # #
-    # # args.objectives = [0, 5, 5, 5]  # TODO
-    # # # args.objectives = [0, 6, 6, 6]  # TODO
-    # args.objectives = [0, 1, 2, 5, 7, 9, 10, 11]
-    # args.distance_metrics = ["HMOM"] * 3#, "HMOM"]#, "HEOM"]
-    # # # args.bias = 1
-    # args.ignore_sensitive = True  # TODO
-    # # # # args.log_compact = True
-    # # args.compute_individual = True
+    # args.model_updates = 10
+    #
+    args.objectives = ["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L"]  # , "IF", "IF"]
+    # args.objectives = "R,SP,IF"
+    args.compute_objectives = ["SBS", "ABFTA"]
+    # args.distance_metrics = ["HMOM"] * 2
+    # args.distance_metrics = ["braycurtis", "HMOM"]#, "HEOM"]
+    #args.steps = 5000
+    # args.window = 1000
+    # args.bias = 1
+    # args.ignore_sensitive = True
+    # args.log_compact = True
+    # args.compute_individual = True
     # args.combined_sensitive_attributes = 0
     # args.log_dir = f"knn_graph{args.combined_sensitive_attributes}"
+    # args.log_coverage_set_only = True
+    # args.discount_history = True
+    # args.discount_factor = 0.95
+    # args.discount_threshold = 1e-5
 
     print(args)
 
     arg_use_wandb = args.wandb == 1
     on_vsc = args.vsc == 1
 
-    env_type = args.env
+    env_type = "covid"
     is_job_hiring = env_type == "covid"
     n_evaluations = 10
 
     env, logdir, ref_point, scaling_factor, max_return = create_fairness_framework_env(args)
 
-    # kw = "small" if args.model == "densesmall" else "big"
-    #ss, se, sa = ss_emb['big'], se_emb['big'], sa_emb['big']
+    kw = "small" if args.model == "densesmall" else "big"
     ss, se, sa = ss_emb['small'], se_emb['small'], sa_emb['small']
 
     model = CovidModel(env.nA, scaling_factor, tuple(args.objectives), ss, se, sa).to(device)
@@ -629,7 +638,8 @@ if __name__ == '__main__':
                logdir=logdir,
                normalise_state=True,
                use_wandb=arg_use_wandb,
-               log_compact=args.log_compact
+               log_compact=args.log_compact,
+               log_coverage_set_only=args.log_coverage_set_only,
                )
     # pr.print_stats(sort="cumulative")
 

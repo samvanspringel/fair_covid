@@ -1,7 +1,7 @@
 import random
 
 import torch
-from datetime import datetime
+import datetime
 
 from agent.pcn.main_pcn import multidiscrete_env
 from gym_covid import *
@@ -10,13 +10,14 @@ import argparse
 from pytz import timezone
 
 import sys
+import os
 
 sys.path.append("./")  # for command-line execution to find the other packages (e.g. envs)
 
 from fairness import SensitiveAttribute, CombinedSensitiveAttribute
 from fairness.fairness_framework import FairnessFramework, ExtendedfMDP
-from fairness.group import GroupNotion
-from fairness.individual import IndividualNotion
+from fairness.group import GroupNotion, ALL_GROUP_NOTIONS
+from fairness.individual import IndividualNotion, ALL_INDIVIDUAL_NOTIONS
 from scenario import FeatureBias
 from scenario.fraud_detection.MultiMAuS.simulator import parameters
 from scenario.fraud_detection.MultiMAuS.simulator.transaction_model import TransactionModel
@@ -24,6 +25,72 @@ from scenario.fraud_detection.env import TransactionModelMDP, FraudFeature
 from scenario.job_hiring.features import HiringFeature, Gender, ApplicantGenerator, Nationality
 from scenario.job_hiring.env import HiringActions, JobHiringEnv
 from scenario.parameter_setup import VSC_SAVE_DIR, device
+
+
+
+#
+Reward_ARI = "Reward_ARI"
+Reward_ARH = "Reward_ARH"
+Reward_SB_W = "Reward_SB_W"
+Reward_SB_S = "Reward_SB_S"
+Reward_SB_L = "Reward_SB_L"
+ALL_REWARDS = [Reward_ARI, Reward_ARH, Reward_SB_W, Reward_SB_S, Reward_SB_L]
+#
+ALL_OBJECTIVES = ALL_REWARDS + ALL_GROUP_NOTIONS + ALL_INDIVIDUAL_NOTIONS
+SORTED_OBJECTIVES = {o: i for i, o in enumerate(ALL_OBJECTIVES)}
+#
+OBJECTIVES_MAPPING = {
+    # Rewards
+    "R_ARI": Reward_ARI,
+    "R_ARH": Reward_ARH,
+    "R_SB_W": Reward_SB_W,
+    "R_SB_S": Reward_SB_S,
+    "R_SB_L": Reward_SB_L,
+    ""
+    # Group notions (over history)
+    "SP": GroupNotion.StatisticalParity,
+    "EO": GroupNotion.EqualOpportunity,
+    "OAE": GroupNotion.OverallAccuracyEquality,
+    "PP": GroupNotion.PredictiveParity,
+    "PE": GroupNotion.PredictiveEquality,
+    "EqOdds": GroupNotion.EqualizedOdds,
+    "CUAE": GroupNotion.ConditionalUseAccuracyEquality,
+    "TE": GroupNotion.TreatmentEquality,
+    # Group notions (over timestep)
+    "SP_t": GroupNotion.StatisticalParity_t,
+    "EO_t": GroupNotion.EqualOpportunity_t,
+    "OAE_t": GroupNotion.OverallAccuracyEquality_t,
+    "PP_t": GroupNotion.PredictiveParity_t,
+    "PE_t": GroupNotion.PredictiveEquality_t,
+    "EqOdds_t": GroupNotion.EqualizedOdds_t,
+    "CUAE_t": GroupNotion.ConditionalUseAccuracyEquality_t,
+    "TE_t": GroupNotion.TreatmentEquality_t,
+    # Individual notions (over history)
+    "IF": IndividualNotion.IndividualFairness,
+    "CSC": IndividualNotion.ConsistencyScoreComplement,
+    "CSC_inn": IndividualNotion.ConsistencyScoreComplement_INN,
+    # Individual notions (over timestep)
+    "IF_t": IndividualNotion.IndividualFairness_t,
+    "SBS": IndividualNotion.SocialBurdenScore,
+    "ABFTA": IndividualNotion.AgeBasedFairnessThroughUnawareness
+    # TODO: include
+    # "CSC_t": IndividualNotion.ConsistencyScoreComplement_t,
+    # "CSC_inn_t": IndividualNotion.ConsistencyScoreComplement_INN_t,
+}
+OBJECTIVES_MAPPING_r = {v: k for k, v in OBJECTIVES_MAPPING.items()}
+parser_all_objectives = ", ".join([f"{v if isinstance(v, str) else v.name} ({k})"
+
+                                   for k, v in OBJECTIVES_MAPPING.items()])
+def get_objective(obj):
+    try:
+        return GroupNotion[obj]
+    except KeyError:
+        pass
+    try:
+        return IndividualNotion[obj]
+    except KeyError:
+        pass
+    return obj
 
 
 class MultiDiscreteAction(gym.ActionWrapper):
@@ -52,7 +119,7 @@ class TodayWrapper(gym.Wrapper):
 
     def reset(self):
         s = super(TodayWrapper, self).reset()
-        ss, se, sa = s[1:] # s TODO changed!
+        ss, se, sa = s[1:]  # s TODO changed!
         return (ss[-1].T, se[-1], sa)
 
     # step function of covid env returns simulation results of every day of timestep
@@ -60,7 +127,7 @@ class TodayWrapper(gym.Wrapper):
     # also discard first reward
     def step(self, action):
         s, r, d, i = super(TodayWrapper, self).step(action)
-        ss, se, sa = s[1:] #TODO changed!
+        ss, se, sa = s[1:]  # TODO changed!
         # sum all the social burden objectives together:
         p_tot = r[2:].sum()
         r = np.concatenate((r, p_tot[None]))
@@ -98,6 +165,64 @@ class HistoryEnv(gym.Wrapper):
         # add state to history
         self._state[-1] = state
         return np.concatenate(self._state, axis=0), r, d, i
+
+
+def create_covid_env(args):
+    import torch
+    import argparse
+
+    parser = argparse.ArgumentParser(description='PCN')
+    parser.add_argument('--objectives', default=[1, 5], type=int, nargs='+',
+                        help='index for ari, arh, pw, ps, pl, ptot')
+    parser.add_argument('--env', default='ode', type=str, help='ode or binomial')
+    parser.add_argument('--action', default='continuous', type=str, help='discrete, multidiscrete or continuous')
+    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
+    parser.add_argument('--steps', default=3e5, type=float, help='total timesteps')
+    parser.add_argument('--batch', default=256, type=int, help='batch size')
+    parser.add_argument('--model-updates', default=50, type=int,
+                        help='number of times the model is updated at every training iteration')
+    parser.add_argument('--top-episodes', default=200, type=int,
+                        help='top-n episodes used to compute target-return and horizon. \
+                  Initially fill ER with n random episodes')
+    parser.add_argument('--n-episodes', default=10, type=int,
+                        help='number of episodes to run between each training iteration')
+    parser.add_argument('--er-size', default=400, type=int,
+                        help='max size (in episodes) of the ER buffer')
+    parser.add_argument('--threshold', default=0.02, type=float, help='crowding distance threshold before penalty')
+    parser.add_argument('--noise', default=0.0, type=float, help='noise applied on target-return on batch-update')
+    parser.add_argument('--model', default='conv1dsmall', type=str, help='conv1d(big|small), dense(big|small)')
+    parser.add_argument('--clip_grad_norm', default=None, type=float, help='clip gradient norm during pcn update')
+    args = parser.parse_args()
+    print(args)
+
+    scale = np.array([800000, 11000, 50., 20, 50, 120])
+
+    env_type = 'ODE'
+    if args.action == 'discrete':
+        env = gym.make(f'BECovidWithLockdown{env_type}Discrete-v0')
+        nA = env.action_space.n
+    else:
+        budget = 5
+        env = gym.make(f'BECovidWithLockdown{env_type}Budget{budget}Continuous-v0')
+        if args.action == 'multidiscrete':
+            env = multidiscrete_env(env)
+            nA = env.action_space.nvec.sum()
+        # continuous
+        else:
+            nA = np.prod(env.action_space.shape)
+    env = TodayWrapper(env)
+    env = ScaleRewardEnv(env, scale=scale)
+
+    env.nA = nA
+
+    # wandb.init(project='pcn-covid', entity='mreymond', config={k: v for k, v in vars(args).items()})
+
+    # logdir = f'{os.getenv("VSC_SCRATCH", "/tmp")}/pcn/commit_4169d7455fa6f08b4a7fa933d66afb9ae7536ff0/'
+    # logdir += '/'.join([f'{k}_{v}' for k, v in vars(args).items()]) + '/'
+    # logdir += datetime.now().strftime('%Y-%m-%d_%H-%M-%S_') + wandb.run.id + '/'
+
+    print(env)
+    return env
 
 
 def create_job_env(args):
@@ -218,77 +343,11 @@ def create_fraud_env(args):
     return env, sensitive_attribute, inn_sensitive_features
 
 
-def create_covid_env(args):
-    import torch
-    import argparse
-
-    parser = argparse.ArgumentParser(description='PCN')
-    parser.add_argument('--objectives', default=[1, 5], type=int, nargs='+',
-                        help='index for ari, arh, pw, ps, pl, ptot')
-    parser.add_argument('--env', default='ode', type=str, help='ode or binomial')
-    parser.add_argument('--action', default='discrete', type=str, help='discrete, multidiscrete or continuous')
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('--steps', default=3e5, type=float, help='total timesteps')
-    parser.add_argument('--batch', default=256, type=int, help='batch size')
-    parser.add_argument('--model-updates', default=50, type=int,
-                        help='number of times the model is updated at every training iteration')
-    parser.add_argument('--top-episodes', default=200, type=int,
-                        help='top-n episodes used to compute target-return and horizon. \
-                  Initially fill ER with n random episodes')
-    parser.add_argument('--n-episodes', default=10, type=int,
-                        help='number of episodes to run between each training iteration')
-    parser.add_argument('--er-size', default=400, type=int,
-                        help='max size (in episodes) of the ER buffer')
-    parser.add_argument('--threshold', default=0.02, type=float, help='crowding distance threshold before penalty')
-    parser.add_argument('--noise', default=0.0, type=float, help='noise applied on target-return on batch-update')
-    parser.add_argument('--model', default='conv1dsmall', type=str, help='conv1d(big|small), dense(big|small)')
-    parser.add_argument('--clip_grad_norm', default=None, type=float, help='clip gradient norm during pcn update')
-    args = parser.parse_args()
-    print(args)
-
-    device = 'cpu'
-    args.action = "continuous"
-
-    env_type = 'ODE' if args.env == 'ode' else 'Binomial'
-    n_evaluations = 1 if env_type == 'ODE' else 10
-    scale = np.array([800000, 11000, 50., 20, 50, 120])
-    ref_point = np.array([-15000000, -200000, -1000.0, -1000.0, -1000.0, -1000.0]) / scale
-    scaling_factor = torch.tensor([[1, 1, 1, 1, 1, 1, 0.1]]).to(device)
-    max_return = np.array([0, 0, 0, 0, 0, 0]) / scale
-    # max_return = np.array([0, -8000, 0, 0, 0, 0])/scale
-    # keep only a selection of objectives
-
-    if args.action == 'discrete':
-        env = gym.make(f'BECovidWithLockdown{env_type}Discrete-v0')
-        nA = env.action_space.n
-    else:
-        env = gym.make(f'BECovidWithLockdown{env_type}Continuous-v0')
-        if args.action == 'multidiscrete':
-            env = multidiscrete_env(env)
-            nA = env.action_space.nvec.sum()
-        # continuous
-        else:
-            nA = np.prod(env.action_space.shape)
-    env = TodayWrapper(env)
-    env = ScaleRewardEnv(env, scale=scale)
-
-    env.nA = nA
-
-    #wandb.init(project='pcn-covid', entity='mreymond', config={k: v for k, v in vars(args).items()})
-
-    # logdir = f'{os.getenv("VSC_SCRATCH", "/tmp")}/pcn/commit_4169d7455fa6f08b4a7fa933d66afb9ae7536ff0/'
-    # logdir += '/'.join([f'{k}_{v}' for k, v in vars(args).items()]) + '/'
-    # logdir += datetime.now().strftime('%Y-%m-%d_%H-%M-%S_') + wandb.run.id + '/'
-
-    print(env)
-    return env
-
-
 def create_fairness_framework_env(args):
     if args.vsc == 1:
         result_dir = VSC_SAVE_DIR
     else:
-        result_dir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/Frameworks/fairRL/fairRLresults"
+        result_dir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults"
 
     env_type = args.env
     if args.no_window:
@@ -303,63 +362,48 @@ def create_fairness_framework_env(args):
     elif is_fraud:
         logdir = f"{result_dir}/fraud_detection/"
         env, sensitive_attribute, inn_sensitive_features = create_fraud_env(args)
+
     else:
-        logdir = f"{result_dir}/covid"
+        logdir = f"{result_dir}/covid/"
         env = create_covid_env(args)
 
     #
-    #logdir += args.log_dir + "/"
-    #logdir += datetime.now().strftime('%Y-%m-%d_%H-%M-%S/')
-    #os.makedirs(logdir, exist_ok=True)
+    logdir += datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S/')
+    os.makedirs(logdir, exist_ok=True)
+    print(logdir)
 
     seed = args.seed
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    all_group_notions = [GroupNotion.StatisticalParity, GroupNotion.EqualOpportunity,
-                         GroupNotion.OverallAccuracyEquality, GroupNotion.PredictiveParity,
-                         GroupNotion.StatisticalParity_t, GroupNotion.EqualOpportunity_t,
-                         GroupNotion.OverallAccuracyEquality_t, GroupNotion.PredictiveParity_t,
-                         ]
-    first_ind_f_index = len(all_group_notions) + 1
-
-    if args.single_objective != -1:
-        # Only reward and group notions are always kept, single individual notion gets index first_ind_f_index
-        args.objectives = [min(args.single_objective, first_ind_f_index)]
-        print("Single objective:", args.objectives)
-        if args.objectives[0] >= first_ind_f_index:
-            args.distance_metrics = args.distance_metrics[:1]
-            print("Distance metric:", args.distance_metrics)
-
-    #
-    _ind_notions_mapping = {
-        first_ind_f_index: IndividualNotion.IndividualFairness,
-        first_ind_f_index + 1: IndividualNotion.ConsistencyScoreComplement,
-        # first_ind_f_index + 2: IndividualNotion.ConsistencyScoreComplement_INN,  # TODO
-        first_ind_f_index + 2: IndividualNotion.IndividualFairness_t,
-    }
-
-    all_individual_notions = [_ind_notions_mapping[o] for o in args.objectives if o >= first_ind_f_index]
-    if args.no_individual:
-        all_individual_notions = []
-    elif args.compute_individual:
-        all_individual_notions = [IndividualNotion.IndividualFairness, IndividualNotion.ConsistencyScoreComplement,
-                                  IndividualNotion.ConsistencyScoreComplement_INN]
-        args.distance_metrics = args.distance_metrics[:1] * len(all_individual_notions)
-    # TODO: individual fairness notion are calculated as requested: o > 5 will be given an index -1?
-    elif first_ind_f_index not in args.objectives:
-        # Only #7
-        if first_ind_f_index + 1 not in args.objectives:
-            o_diff = 2
-        # Only 6+
+    ALL_OBJECTIVES = ALL_REWARDS + ALL_GROUP_NOTIONS + ALL_INDIVIDUAL_NOTIONS
+    sort_objectives = {o: i for i, o in enumerate(ALL_OBJECTIVES)}
+    # Check for concatenated arguments for objectives and compute objectives
+    _sep = ":"
+    if len(args.objectives) == 1 and _sep in args.objectives[0]:
+        args.objectives = args.objectives[0].split(_sep)
+    if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
+        args.compute_objectives = args.compute_objectives[0].split(_sep)
+    all_args_objectives = args.objectives + args.compute_objectives
+    ordered_objectives = sorted(all_args_objectives,
+                                key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])
+    args.objectives = [i for i, o in enumerate(ordered_objectives) if o in args.objectives]
+    # Check for concatenated distance metrics
+    ind_notions = [n for n in all_args_objectives if isinstance(get_objective(OBJECTIVES_MAPPING[n]), IndividualNotion)]
+    if len(args.distance_metrics) == 1:
+        if _sep in args.distance_metrics[0]:
+            args.distance_metrics = args.distance_metrics[0].split(_sep)
+            dist_metrics = [(n, d) for n, d in zip(ind_notions, args.distance_metrics)]
+            dist_metrics = sorted(dist_metrics, key=lambda x: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[x[0]])])
+            args.distance_metrics = [d for (n, d) in dist_metrics]
         else:
-            o_diff = 1
-        args.objectives = [o if o < first_ind_f_index else o - o_diff for o in args.objectives]
+            args.distance_metrics = args.distance_metrics * len(ind_notions)
 
-    use_discount_history = args.discount_history != 0
-    discount_factor = args.discount_factor if use_discount_history else None
-    discount_threshold = args.discount_threshold if use_discount_history else None
+    mapped_ordered_notions = [OBJECTIVES_MAPPING[n] for n in ordered_objectives]
+    all_group_notions = [n for n in mapped_ordered_notions if isinstance(n, GroupNotion)]
+    all_individual_notions = [n for n in mapped_ordered_notions if isinstance(n, IndividualNotion)]
+
     fairness_framework = FairnessFramework([a for a in HiringActions], [],
                                            individual_notions=all_individual_notions,
                                            group_notions=all_group_notions,
@@ -367,19 +411,30 @@ def create_fairness_framework_env(args):
                                            distance_metrics=args.distance_metrics,
                                            alpha=args.fair_alpha,
                                            window=args.window,
-                                           discount_factor=discount_factor,
-                                           discount_threshold=discount_threshold,
+                                           discount_factor=args.discount_factor if args.discount_history else None,
+                                           discount_threshold=args.discount_threshold if args.discount_history else None,
+                                           discount_delay=args.discount_delay if args.discount_history else None,
+                                           nearest_neighbours=args.nearest_neighbours,
                                            inn_sensitive_features=None,
                                            # inn_sensitive_features=[HiringFeature.gender.value],  # TODO
                                            seed=seed,
                                            steps=int(args.steps),
-                                           store_interactions=False, has_individual_fairness=not args.no_individual)
+                                           store_interactions=False,
+                                           has_individual_fairness=len(all_individual_notions) > 0)
 
     # Extend the environment with fairness framework
     env = ExtendedfMDP(env, fairness_framework)
 
-    # TODO:  #notions = #group notions + #individual notions with specific similarity distance
     # TODO: max reward still ok with new metrics/group divisions
+    _num_group_notions = (len(sensitive_attribute) if args.combined_sensitive_attributes >= 2 else 1) * len(
+        all_group_notions)
+    _num_notions = _num_group_notions + len(all_individual_notions)
+    max_reward = args.episode_length * 1
+    scale = np.array([1] + [1] * _num_notions)  # TODO: treatment equality scale+max
+    ref_point = np.array([-max_reward] + [-args.episode_length] * _num_notions)
+    scaling_factor = torch.tensor([[1.0] + ([1] * _num_notions) + [0.1]]).to(device)
+    max_return = np.array([max_reward] + [0] * _num_notions) / scale
+
     _num_group_notions = (len(sensitive_attribute) if args.combined_sensitive_attributes >= 2 else 1) * len(
         all_group_notions)
     _num_notions = _num_group_notions + len(all_individual_notions)
@@ -393,19 +448,30 @@ def create_fairness_framework_env(args):
     env.scale = scale
     env.action_space = env.env.action_space
 
+    print(all_args_objectives)
+    print(ordered_objectives)
+    print(max_return)
+    #print(len(all_group_notions), len(all_individual_notions))
+
+    env.nA = env.env.nA
+    env.scale = scale
+    env.action_space = env.env.action_space
+
     return env, logdir, ref_point, scaling_factor, max_return
 
 
-#
 fMDP_parser = argparse.ArgumentParser(description='fMDP_parser', add_help=False)
-fMDP_parser.add_argument('--objectives', default=[0, 1], type=int, nargs='+',
-                         help='index for reward (0), StatisticalParity (1), EqualOpportunity (2), '
-                              'OverallAccuracyEquality (3), PredictiveParity (4), '
-                              'IndividualFairness (5), ConsistencyScoreComplement (6),'
-                              'ConsistencyScoreComplement_INN (7)')
-fMDP_parser.add_argument('--single_objective', default=-1, type=int, help="Use a single objective to train on")
-fMDP_parser.add_argument('--compute_individual', action='store_true', help='Compute individual fairness, '
-                                                                           'regardless of the objectives given for PCN')
+#
+fMDP_parser.add_argument('--objectives', default=['R', 'SP'],
+                         type=str, nargs='+', help='Abbreviations of the fairness notions to optimise, one or more of: '
+                                                   f'{parser_all_objectives}. Can be supplied as a single string, with'
+                                                   f'the arguments separated by a colon, e.g., "R:SP"')
+fMDP_parser.add_argument('--compute_objectives', default=['EO', 'OAE', 'PP', 'IF', 'CSC'],
+                         type=str, nargs='*', help='Abbreviations of the fairness notions to compute, '
+                                                   f'in addition to the ones being optimised: {parser_all_objectives}'
+                                                   f' Can be supplied as a single string, with the arguments separated '
+                                                   f'by a colon, e.g., "EO:OAE:PP:IF:CSC"')
+#
 fMDP_parser.add_argument('--env', default='job', type=str, help='job or fraud')
 #
 fMDP_parser.add_argument('--seed', default=0, type=int, help='seed for rng')
@@ -426,22 +492,31 @@ fMDP_parser.add_argument('--bias', default=0, type=int, help='Which bias configu
 fMDP_parser.add_argument('--ignore_sensitive', action='store_true')
 # Fairness framework
 fMDP_parser.add_argument('--window', default=100, type=int, help='fairness framework window')
-fMDP_parser.add_argument('--discount_history', default=0, type=int,
-                         help='use a discounted history or sliding window implementation')
+fMDP_parser.add_argument('--discount_history', action='store_true',
+                         help='use a discounted history instead of a sliding window implementation')
 fMDP_parser.add_argument('--discount_factor', default=1.0, type=float,
                          help='fairness framework discount factor for history')
 fMDP_parser.add_argument('--discount_threshold', default=1e-5, type=float,
                          help='fairness framework discount threshold for history')
+fMDP_parser.add_argument('--discount_delay', default=5, type=int,
+                         help='the number of timesteps to consider for the fairness notion to not fluctuate more than '
+                              'discount_threshold, before deleting earlier timesteps')
+fMDP_parser.add_argument('--nearest_neighbours', default=5, type=int,
+                         help='the number of neighbours to consider for individual fairness notions based on CSC')
 fMDP_parser.add_argument('--fair_alpha', default=0.1, type=float, help='fairness framework alpha for similarity metric')
 fMDP_parser.add_argument('--wandb', default=1, type=int,
                          help="(Ignored, overrides to 0) use wandb for loggers or save local only")
 fMDP_parser.add_argument('--no_window', default=0, type=int, help="Use the full history instead of a window")
 fMDP_parser.add_argument('--no_individual', default=0, type=int, help="No individual fairness notions")
-fMDP_parser.add_argument('--distance_metrics', default=[], type=str, nargs='+',
-                         help='The distance metric to use for every individual fairness notion specified')
+fMDP_parser.add_argument('--distance_metrics', default=['none'], type=str, nargs='*',
+                         help='The distance metric to use for every individual fairness notion specified. '
+                              'The distance metrics should be supplied for each individual fairness in the objectives, '
+                              'then followed by computed objectives. Can be supplied as a single string, with the '
+                              'arguments separated by a colon, e.g., "braycurtis:HEOM"')
 #
 fMDP_parser.add_argument('--combined_sensitive_attributes', default=0, type=int,
                          help='Use a combination of sensitive attributes to compute fairness notions')
 #
 fMDP_parser.add_argument('--log_dir', default='new_experiment', type=str, help="Directory where to store results")
 fMDP_parser.add_argument('--log_compact', action='store_true', help='Save compact logs to save space.')
+fMDP_parser.add_argument('--log_coverage_set_only', action='store_true', help='Save only the coverage set logs')

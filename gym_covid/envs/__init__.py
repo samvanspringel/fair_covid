@@ -14,13 +14,14 @@ import gym
 
 
 def be_config():
-    resources = files('gym_covid')    
+    resources = files('gym_covid')
     config_file = 'config/wave1.json'
     with open(resources / config_file, 'r') as f:
         config = json.load(f)
 
     contact_types = ['home', 'work', 'transport', 'school', 'leisure', 'otherplace']
-    csm = [pd.read_csv(resources / config['social_contact_dir'] / f'{ct}.csv', header=None).values for ct in contact_types]
+    csm = [pd.read_csv(resources / config['social_contact_dir'] / f'{ct}.csv', header=None).values for ct in
+           contact_types]
     csm = np.array(csm)
 
     ## set paths correctly for 'population' and 'cases' items
@@ -38,13 +39,13 @@ def be_config():
 
     df = pd.read_csv(resources / config['hospitalizations'])
     hospitalization = df['NewPatientsNotReferredHospital'].values.flatten()
-    #startdate is 08/03/22
+    # startdate is 08/03/22
     hospitalization = np.concatenate((np.zeros(7), hospitalization))
 
     datapoints = {
         'hospitalizations': hospitalization,
         'deaths': deaths,
-        }
+    }
 
     return config, csm, datapoints
 
@@ -73,23 +74,23 @@ class TimestepsLeft(gym.ObservationWrapper):
 
 def until_2020_09_01(env):
     end = datetime.date(2020, 9, 1)
-    timesteps = round((end-env.today).days/env.days_per_timestep)
+    timesteps = round((end - env.today).days / env.days_per_timestep)
     return TimeLimit(env, timesteps)
 
 
 def until_2021_01_01(env):
     end = datetime.date(2021, 1, 1)
-    timesteps = round((end-env.today).days/env.days_per_timestep)
+    timesteps = round((end - env.today).days / env.days_per_timestep)
     return TimeLimit(env, timesteps)
 
 
 def discretize_actions(env, work=None, school=None, leisure=None):
     if work is None:
-        work = np.array([0, 30, 60])/100
+        work = np.array([0, 30, 60]) / 100
     if school is None:
-        school = np.array([0, 50, 100])/100
+        school = np.array([0, 50, 100]) / 100
     if leisure is None:
-        leisure = np.array([30, 60, 90])/100
+        leisure = np.array([30, 60, 90]) / 100
     # all combinations of work, school, leisure
     actions = np.meshgrid(work, school, leisure)
     actions = np.stack(actions).reshape(3, -1).T
@@ -109,12 +110,11 @@ class EndPenalty(gym.Wrapper):
             I = I.sum(1)
             # compute slope: (y2-y1)/(x2-x1)
             # assume x2-x1=1
-            d_I = I[-1]-I[0]
+            d_I = I[-1] - I[0]
             # if slope too high (meaning next wave is coming up), add penalty
             if d_I >= EndPenalty.d_I_limit:
                 r[1] -= EndPenalty.d_I_penalty
         return s, r, t, info
-
 
 
 def create_env(env_type='ODE', discrete_actions=False, simulate_lockdown=True, until=None, budget=None):
@@ -136,7 +136,6 @@ def create_env(env_type='ODE', discrete_actions=False, simulate_lockdown=True, u
         env = discretize_actions(env)
     return env
 
-
 for env_type in ('ODE', 'Binomial'):
     for discrete_actions in (False, True):
         for simulate_lockdown in (False, True):
@@ -147,6 +146,7 @@ for env_type in ('ODE', 'Binomial'):
                     l = 'WithLockdown' if simulate_lockdown else ''
                     u = 'Until2021' if until == until_2021_01_01 else ''
                     # envs
+                    #print(f'BECovid{l}{u}{env_type}{b}{a}-v0')
                     register(
                         id=f'BECovid{l}{u}{env_type}{b}{a}-v0',
                         entry_point='gym_covid.envs:create_env',
@@ -156,4 +156,4 @@ for env_type in ('ODE', 'Binomial'):
                             'simulate_lockdown': simulate_lockdown,
                             'until': until,
                             'budget': budget}
-                        )
+                    )

@@ -307,11 +307,11 @@ if __name__ == '__main__':
     logdir = f'{os.getenv("VSC_SCRATCH", "/tmp")}/pcn/commit_8cfebc4c41aa5c400a7e593ffd681c3c03e532b1/until2021/'
     # logdir += '/'.join([f'{k}_{v}' for k, v in vars(args).items()]) + '/'
     # logdir += datetime.now().strftime('%Y-%m-%d_%H-%M-%S_') + str(uuid.uuid4())[:4] + '/'
-
+    logdir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/experiments/results"
     #wandb.init(project='pcn-covid', entity='icimpean', config={k: v for k, v in vars(args).items()})
 
-    args.top_episodes = 3  # TODO
-    args.steps = 3e2  # TODO
+    args.top_episodes = 10  # TODO
+    args.steps = 3e5  # TODO
 
     train(env,
           model,

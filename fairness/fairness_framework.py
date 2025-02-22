@@ -1,6 +1,6 @@
-from typing import Union, List
+from typing import Union, List, Iterable
 
-import gym as gym
+import gym
 
 from fairness import SensitiveAttribute
 from fairness.group import GroupNotion, ALL_GROUP_NOTIONS, TIMESTEP_GROUP_NOTIONS
@@ -9,10 +9,6 @@ from fairness.history import History, SlidingWindowHistory, DiscountedHistory, H
 from fairness.individual import ALL_INDIVIDUAL_NOTIONS, IndividualNotion, TIMESTEP_INDIVIDUAL_NOTIONS
 from fairness.individual.individual_fairness import IndividualFairness
 from scenario import CombinedState
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
 
 
 class FairnessFramework(object):
@@ -34,7 +30,8 @@ class FairnessFramework(object):
                  distance_metrics=[], alpha=None,
                  group_notions=None, individual_notions=None, window=None,
                  store_interactions=True, has_individual_fairness=True,
-                 discount_factor=None, discount_threshold=None,
+                 discount_factor=None, discount_threshold=None, discount_delay=None,
+                 nearest_neighbours=None,
                  inn_sensitive_features=None, seed=None, steps=None):
         self.actions = actions
         self.window = window
@@ -42,16 +39,22 @@ class FairnessFramework(object):
         self.has_individual_fairness = has_individual_fairness
         self.discount_factor = discount_factor
         self.discount_threshold = discount_threshold
+        self.discount_delay = discount_delay
+        self.nearest_neighbours = nearest_neighbours
         # Use a discounted history
         if discount_factor is not None:
-            self.history = DiscountedHistory(actions, self.discount_factor, self.discount_threshold,
+            self.history = DiscountedHistory(actions,
+                                             self.discount_factor, self.discount_threshold, self.discount_delay,
                                              store_interactions=self.store_interactions,
-                                             has_individual_fairness=self.has_individual_fairness)
+                                             has_individual_fairness=self.has_individual_fairness,
+                                             nearest_neighbours=self.nearest_neighbours)
         # Use a sliding window history
         else:
             self.history = SlidingWindowHistory(actions, self.window, store_interactions=self.store_interactions,
-                                                has_individual_fairness=self.has_individual_fairness)
-        self.history_t = HistoryTimestep(actions, has_individual_fairness=self.has_individual_fairness)
+                                                has_individual_fairness=self.has_individual_fairness,
+                                                nearest_neighbours=self.nearest_neighbours)
+        self.history_t = HistoryTimestep(actions, has_individual_fairness=self.has_individual_fairness,
+                                         nearest_neighbours=self.nearest_neighbours)
         #
         self.sensitive_attributes = [sensitive_attributes] \
             if isinstance(sensitive_attributes, SensitiveAttribute) else sensitive_attributes
@@ -61,13 +64,17 @@ class FairnessFramework(object):
         #
         self.threshold = threshold
         #
-        self.group_notions = group_notions if group_notions is not None else ALL_GROUP_NOTIONS
+        self.group_notions = group_notions
         self.group_fairness = GroupFairness(actions)
         #
-        self.individual_notions = individual_notions if individual_notions is not None else ALL_INDIVIDUAL_NOTIONS
+        self.individual_notions = individual_notions
         if not self.has_individual_fairness:
             self.individual_notions = []
-        self.distance_metrics = distance_metrics if individual_notions is not None else ["braycurtis"] * len(ALL_INDIVIDUAL_NOTIONS)
+        assert (len(distance_metrics) == len(self.individual_notions)) or (len(distance_metrics) == 1), \
+            f"The number of distance_metrics given must be either 1 or equal to the number of individual_notions. " \
+            f"Found distance_metrics: {distance_metrics}, individual_notions: {self.individual_notions}"
+        self.distance_metrics = distance_metrics if len(distance_metrics) != 1 \
+            else distance_metrics * len(self.individual_notions)
 
         ind_metrics = [d for n, d in zip(self.individual_notions, self.distance_metrics)
                        if n is IndividualNotion.IndividualFairness]
@@ -106,23 +113,6 @@ class FairnessFramework(object):
         return self.individual_fairness.get_notion(individual_notion, history, threshold,
                                                    similarity_metric, alpha, distance_metric)
 
-    def check_fairness(self):
-        actions = self.history.actions
-        fairness_actions = np.zeros(len(actions))
-        w_l = 3
-        w_s = 2
-        w_w = 1
-        counter = 0
-        for action in actions:
-            p_w, p_s, p_l = action
-            fairness = 0
-            for i in range(10):
-                fairness += i/10*(p_w*w_w + p_s*w_s + p_l*w_l)
-            fairness_actions[counter] += fairness
-            print(f"Fairness of action {action} is {fairness}")
-            counter += 1
-        return fairness_actions.mean()
-
 
 class ExtendedfMDP(gym.Env):
     """An extended job hiring fMDP, with a fairness framework"""
@@ -159,7 +149,7 @@ class ExtendedfMDP(gym.Env):
     def reset(self, seed=None, options=None):
         self._t += 1
         self._episode += 1
-        self.fairness_framework.history.features = None #self.env._features_i
+        self.fairness_framework.history.features = None
         return self.env.reset()
 
     def step(self, action, scores=None):
@@ -172,7 +162,7 @@ class ExtendedfMDP(gym.Env):
         self.fairness_framework.update_history(self._episode, self._t, entities)
 
         # Add fairness notions as additional rewards
-        reward = reward #TODO changed
+        reward = reward if isinstance(reward, Iterable) else [reward]
         # Group notions: For each sensitive attribute
         for sensitive_attribute in self.fairness_framework.sensitive_attributes:
             for notion in self.fairness_framework.group_notions:
@@ -195,9 +185,8 @@ class ExtendedfMDP(gym.Env):
                                                               self.fairness_framework.similarity_metric,
                                                               self.fairness_framework.alpha,
                                                               (distance_metric, metric))
-            reward.append(diff)
+            #reward.append(diff)
         self._t += 1
-
         return next_state, reward, done, info
 
     def normalise_state(self, state: CombinedState):

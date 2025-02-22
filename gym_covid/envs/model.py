@@ -147,6 +147,9 @@ class EpiModel(object):
     def simulate_day(self, C_asym, C_sym):
         raise NotImplementedError('required for simulation')
 
+    def get_hospitalization_risk(self):
+        return self.psi
+
 
 class ODEModel(EpiModel):
 
@@ -189,7 +192,6 @@ class ODEModel(EpiModel):
         self.current_state = ret[-1].reshape(self.init_state.shape)
 
         return self.current_state
-
 
 @jit(nopython=True)
 def _step_float(n, rate):
