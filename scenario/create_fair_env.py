@@ -457,6 +457,10 @@ def create_fairness_framework_env(args):
     env.scale = scale
     env.action_space = env.env.action_space
 
+    print("Arguments passed to the script environment:")
+    for arg, value in vars(args).items():
+        print(f"{arg}: {value}")
+
     return env, logdir, ref_point, scaling_factor, max_return
 
 

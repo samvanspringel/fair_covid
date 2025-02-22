@@ -548,9 +548,9 @@ if __name__ == '__main__':
                                      parents=[fMDP_parser])
     parser.add_argument('--action', default='continuous', type=str, help='discrete, multidiscrete or continuous')
     parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('--steps', default=1e5, type=float, help='total timesteps')
+    parser.add_argument('--steps', default=3e5, type=float, help='total timesteps')
     parser.add_argument('--batch', default=256, type=int, help='batch size')
-    parser.add_argument('--model-updates', default=20, type=int,
+    parser.add_argument('--model-updates', default=50, type=int,
                         help='number of times the model is updated at every training iteration')
     parser.add_argument('--top-episodes', default=200, type=int,
                         help='top-n episodes used to compute target-return and horizon. '
@@ -560,7 +560,7 @@ if __name__ == '__main__':
     parser.add_argument('--er-size', default=1000, type=int,
                         help='max size (in episodes) of the ER buffer')
     parser.add_argument('--threshold', default=0.02, type=float, help='crowding distance threshold before penalty')
-    parser.add_argument('--noise', default=0.0, type=float, help='noise applied on target-return on batch-update')
+    parser.add_argument('--noise', default=0.1, type=float, help='noise applied on target-return on batch-update')
     parser.add_argument('--model', default='densesmall', type=str, help='dense(big|small)')
 
     args = parser.parse_args()
@@ -601,7 +601,9 @@ if __name__ == '__main__':
     # args.discount_factor = 0.95
     # args.discount_threshold = 1e-5
 
-    print(args)
+    print("Arguments passed to the script main:")
+    for arg, value in vars(args).items():
+        print(f"{arg}: {value}")
 
     arg_use_wandb = args.wandb == 1
     on_vsc = args.vsc == 1
