@@ -561,7 +561,7 @@ if __name__ == '__main__':
                         help='max size (in episodes) of the ER buffer')
     parser.add_argument('--threshold', default=0.02, type=float, help='crowding distance threshold before penalty')
     parser.add_argument('--noise', default=0.1, type=float, help='noise applied on target-return on batch-update')
-    parser.add_argument('--model', default='densesmall', type=str, help='dense(big|small)')
+    parser.add_argument('--model', default='conv1dbig', type=str, help='dense(big|small)')
 
     args = parser.parse_args()
     no_save = False
@@ -614,8 +614,11 @@ if __name__ == '__main__':
 
     env, logdir, ref_point, scaling_factor, max_return = create_fairness_framework_env(args)
 
-    kw = "small" if args.model == "densesmall" else "big"
-    ss, se, sa = ss_emb['small'], se_emb['small'], sa_emb['small']
+    if args.model == 'conv1dbig':
+        ss, se, sa = ss_emb['conv1d'], se_emb['big'], sa_emb['big']
+
+    # kw = "small" if args.model == "densesmall" else "big"
+    # ss, se, sa = ss_emb['small'], se_emb['small'], sa_emb['small']
 
     model = CovidModel(env.nA, scaling_factor, tuple(args.objectives), ss, se, sa).to(device)
     model = ContinuousHead(model)
