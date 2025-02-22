@@ -1,3 +1,3 @@
 
-VSC_SAVE_DIR = "/data/brussel/104/vsc10437/Fairness/"
+VSC_SAVE_DIR = "/data/brussel/110/vsc11027"
 device = 'cpu'
