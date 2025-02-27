@@ -282,13 +282,12 @@ def create_fairness_framework_env(args):
         result_dir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults"
 
     env_type = args.env
-    print("ARG ENV TYPE", env_type)
-    print("ARG ENV TYPE", args.env)
+
     if args.no_window:
         args.window = None
-    is_job_hiring = env_type == "covid"
+    is_covid = env_type == "covid"
     # Job hiring
-    if is_job_hiring:
+    if is_covid:
         logdir = f"{result_dir}/job_hiring/"
         env, sensitive_attribute, inn_sensitive_features = create_job_env(args)
 
@@ -405,7 +404,7 @@ fMDP_parser.add_argument('--compute_objectives', default=['EO', 'OAE', 'PP', 'IF
                                                    f' Can be supplied as a single string, with the arguments separated '
                                                    f'by a colon, e.g., "EO:OAE:PP:IF:CSC"')
 #
-fMDP_parser.add_argument('--env', default='job', type=str, help='job or fraud')
+fMDP_parser.add_argument('--env', default='covid', type=str, help='job or fraud')
 #
 fMDP_parser.add_argument('--seed', default=0, type=int, help='seed for rng')
 fMDP_parser.add_argument('--vsc', default=0, type=int, help='running on local (0) or VSC cluster (1)')
