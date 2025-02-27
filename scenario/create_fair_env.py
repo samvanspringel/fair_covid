@@ -282,10 +282,11 @@ def create_fairness_framework_env(args):
         result_dir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults"
 
     env_type = args.env
+    print("ARG ENV TYPE", env_type)
+    print("ARG ENV TYPE", args.env)
     if args.no_window:
         args.window = None
     is_job_hiring = env_type == "covid"
-    is_fraud = False
     # Job hiring
     if is_job_hiring:
         logdir = f"{result_dir}/job_hiring/"
