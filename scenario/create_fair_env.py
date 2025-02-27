@@ -19,9 +19,6 @@ from fairness.fairness_framework import FairnessFramework, ExtendedfMDP
 from fairness.group import GroupNotion, ALL_GROUP_NOTIONS
 from fairness.individual import IndividualNotion, ALL_INDIVIDUAL_NOTIONS
 from scenario import FeatureBias
-from scenario.fraud_detection.MultiMAuS.simulator import parameters
-from scenario.fraud_detection.MultiMAuS.simulator.transaction_model import TransactionModel
-from scenario.fraud_detection.env import TransactionModelMDP, FraudFeature
 from scenario.job_hiring.features import HiringFeature, Gender, ApplicantGenerator, Nationality
 from scenario.job_hiring.env import HiringActions, JobHiringEnv
 from scenario.parameter_setup import VSC_SAVE_DIR, device
@@ -278,71 +275,6 @@ def create_job_env(args):
     return env, sensitive_attribute, inn_sensitive_features
 
 
-def create_fraud_env(args):
-    # the parameters for the simulation
-    params = parameters.get_default_parameters()  # TODO: abstract parameters
-    params['seed'] = args.seed
-    params['init_satisfaction'] = 0.9
-    params['stay_prob'] = [0.9, 0.6]
-    params['num_customers'] = 100
-    params['num_fraudsters'] = 10
-    # params['end_date'] = datetime(2016, 12, 31).replace(tzinfo=timezone('US/Pacific'))
-    # params['end_date'] = datetime(2016, 3, 31).replace(tzinfo=timezone('US/Pacific'))
-    # # TODO (90357 yearly) Used for min/max reward
-    # episode_length = np.sum(params["trans_per_year"]).astype(int) / 366 * (31 + 29 + 31)
-    # 1 week = +- 1728 transactions
-    num_transactions = args.n_transactions  # 1000
-    params['end_date'] = datetime(2016, 1, 7).replace(tzinfo=timezone('US/Pacific'))
-    # episode_length = np.sum(params["trans_per_year"]).astype(int) / 366 * (7)  # (90357) Used for min/max reward
-    episode_length = num_transactions
-    if args.fraud_proportion != 0:
-        curr_sum = np.sum(params['trans_per_year'])
-        params['trans_per_year'] = np.array([curr_sum * (1 - args.fraud_proportion),
-                                             curr_sum * args.fraud_proportion])
-
-    # Initialise and get features to ignore in distance metrics
-    if args.ignore_sensitive:
-        exclude_from_distance = (FraudFeature.continent, FraudFeature.country, FraudFeature.card_id)
-    else:
-        exclude_from_distance = ()
-
-    # TODO: abstract parameters
-    # Continents mapping from default parameters: {'EU': 0, 'AS': 1, 'NA': 2, 'AF': 3, 'OC': 4, 'SA': 5}
-    # sensitive_attribute = SensitiveAttribute(FraudFeature.continent, sensitive_values=1, other_values=0)
-    # NA vs EU instead of AS vs EU to increase population size in both
-    if args.combined_sensitive_attributes == 1:
-        sensitive_attribute = CombinedSensitiveAttribute([FraudFeature.continent, FraudFeature.merchant_id],
-                                                         sensitive_values=[2, 6],
-                                                         other_values=[0, None])
-        inn_sensitive_features = [FraudFeature.continent.value]  # TODO
-    elif args.combined_sensitive_attributes == 2:
-        sensitive_attribute = [SensitiveAttribute(FraudFeature.continent, sensitive_values=2,
-                                                  other_values=0),
-                               SensitiveAttribute(FraudFeature.merchant_id, sensitive_values=6,
-                                                  other_values=None)]
-        inn_sensitive_features = [FraudFeature.continent.value, FraudFeature.continent.merchant_id]
-    else:
-        sensitive_attribute = SensitiveAttribute(FraudFeature.continent, sensitive_values=2, other_values=0)
-        inn_sensitive_features = [FraudFeature.continent.value]
-
-    # No bias
-    if args.bias == 0:
-        reward_biases = []
-    # Bias on gender
-    elif args.bias == 1:
-        reward_biases = [FeatureBias(features=[FraudFeature.continent], feature_values=[0], bias=0.1)]
-    # Bias on nationality and gender
-    elif args.bias == 2:
-        reward_biases = [FeatureBias(features=[FraudFeature.continent, FraudFeature.merchant_id],
-                                     feature_values=[0, 0], bias=0.1)]  # TODO: which merchant to target
-
-    transaction_model = TransactionModel(params, seed=args.seed)
-    env = TransactionModelMDP(transaction_model, do_reward_shaping=True, num_transactions=num_transactions,
-                              exclude_from_distance=exclude_from_distance, reward_biases=reward_biases)
-
-    return env, sensitive_attribute, inn_sensitive_features
-
-
 def create_fairness_framework_env(args):
     if args.vsc == 1:
         result_dir = VSC_SAVE_DIR
@@ -358,10 +290,6 @@ def create_fairness_framework_env(args):
     if is_job_hiring:
         logdir = f"{result_dir}/job_hiring/"
         env, sensitive_attribute, inn_sensitive_features = create_job_env(args)
-    # Fraud
-    elif is_fraud:
-        logdir = f"{result_dir}/fraud_detection/"
-        env, sensitive_attribute, inn_sensitive_features = create_fraud_env(args)
 
     else:
         logdir = f"{result_dir}/covid/"
