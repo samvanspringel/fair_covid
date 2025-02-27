@@ -288,13 +288,12 @@ def create_fairness_framework_env(args):
     is_covid = env_type == "covid"
     # Job hiring
     if is_covid:
-        logdir = f"{result_dir}/job_hiring/"
-        env, sensitive_attribute, inn_sensitive_features = create_job_env(args)
-
-    else:
         logdir = f"{result_dir}/covid/"
         env = create_covid_env(args)
-
+    else:
+        logdir = f"{result_dir}/job_hiring/"
+        env, sensitive_attribute, inn_sensitive_features = create_job_env(args)
+    print(env)
     #
     logdir += datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S/')
     os.makedirs(logdir, exist_ok=True)
