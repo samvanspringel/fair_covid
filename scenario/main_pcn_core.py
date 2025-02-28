@@ -563,6 +563,11 @@ if __name__ == '__main__':
     parser.add_argument('--noise', default=0.1, type=float, help='noise applied on target-return on batch-update')
     parser.add_argument('--model', default='conv1dbig', type=str, help='dense(big|small)')
 
+    import sys
+
+    print("sys.argv:", sys.argv)
+    exit()
+
     args = parser.parse_args()
 
     no_save = False

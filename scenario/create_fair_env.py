@@ -311,10 +311,8 @@ def create_fairness_framework_env(args):
 
     if _sep in args.objectives:
         args.objectives = args.objectives.split(_sep)
-        print("OBJECTIVES:", args.objectives)
     if _sep in args.compute_objectives:
         args.compute_objectives = args.compute_objectives.split(_sep)
-        print("CO", args.compute_objectives)
     all_args_objectives = args.objectives + args.compute_objectives
 
     ordered_objectives = sorted(all_args_objectives,
