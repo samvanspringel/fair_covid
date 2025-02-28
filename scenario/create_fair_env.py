@@ -23,8 +23,6 @@ from scenario.job_hiring.features import HiringFeature, Gender, ApplicantGenerat
 from scenario.job_hiring.env import HiringActions, JobHiringEnv
 from scenario.parameter_setup import VSC_SAVE_DIR, device
 
-
-
 #
 Reward_ARI = "Reward_ARI"
 Reward_ARH = "Reward_ARH"
@@ -75,9 +73,10 @@ OBJECTIVES_MAPPING = {
     # "CSC_inn_t": IndividualNotion.ConsistencyScoreComplement_INN_t,
 }
 OBJECTIVES_MAPPING_r = {v: k for k, v in OBJECTIVES_MAPPING.items()}
-parser_all_objectives = ", ".join([f"{v if isinstance(v, str) else v.name} ({k})"
+parser_all_objectives = ", ".join(
+    [f"{v if isinstance(v, str) else v.name} ({k})" for k, v in OBJECTIVES_MAPPING.items()])
 
-                                   for k, v in OBJECTIVES_MAPPING.items()])
+
 def get_objective(obj):
     try:
         return GroupNotion[obj]
@@ -318,8 +317,8 @@ def create_fairness_framework_env(args):
     print("Before objectives:", args.objectives)
     print("Before computeobj:", args.compute_objectives)
 
-
     all_args_objectives = args.objectives + args.compute_objectives
+
     ordered_objectives = sorted(all_args_objectives,
                                 key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])
     print("Before ordered:", ordered_objectives)
@@ -332,7 +331,8 @@ def create_fairness_framework_env(args):
         if _sep in args.distance_metrics[0]:
             args.distance_metrics = args.distance_metrics[0].split(_sep)
             dist_metrics = [(n, d) for n, d in zip(ind_notions, args.distance_metrics)]
-            dist_metrics = sorted(dist_metrics, key=lambda x: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[x[0]])])
+            dist_metrics = sorted(dist_metrics,
+                                  key=lambda x: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[x[0]])])
             args.distance_metrics = [d for (n, d) in dist_metrics]
         else:
             args.distance_metrics = args.distance_metrics * len(ind_notions)
@@ -388,7 +388,7 @@ def create_fairness_framework_env(args):
     print(all_args_objectives)
     print(ordered_objectives)
     print(max_return)
-    #print(len(all_group_notions), len(all_individual_notions))
+    # print(len(all_group_notions), len(all_individual_notions))
 
     env.nA = env.env.nA
     env.scale = scale
