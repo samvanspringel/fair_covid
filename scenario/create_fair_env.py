@@ -311,12 +311,21 @@ def create_fairness_framework_env(args):
 
     if len(args.objectives) == 1 and _sep in args.objectives[0]:
         args.objectives = args.objectives[0].split(_sep)
+        print(args.objectives)
     if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
         args.compute_objectives = args.compute_objectives[0].split(_sep)
+
+    print("Before objectives:", args.objectives)
+    print("Before computeobj:", args.compute_objectives)
+
+
     all_args_objectives = args.objectives + args.compute_objectives
     ordered_objectives = sorted(all_args_objectives,
                                 key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])
+    print("Before ordered:", ordered_objectives)
     args.objectives = [i for i, o in enumerate(ordered_objectives) if o in args.objectives]
+
+    print("Parsed objectives:", args.objectives)
     # Check for concatenated distance metrics
     ind_notions = [n for n in all_args_objectives if isinstance(get_objective(OBJECTIVES_MAPPING[n]), IndividualNotion)]
     if len(args.distance_metrics) == 1:

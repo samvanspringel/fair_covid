@@ -584,7 +584,7 @@ if __name__ == '__main__':
     # args.er_size = 200
     # args.model_updates = 10
     #
-    # args.objectives = "'R_ARI:R_ARH:R_SB_W:R_SB_S:R_SB_L'" #["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L"]  # , "IF", "IF"]
+    args.objectives = ['R_ARI:R_SB_W:R_SB_S:R_SB_L'] #"'R_ARI:R_ARH:R_SB_W:R_SB_S:R_SB_L'" #["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L"]  # , "IF", "IF"]
     # args.objectives = "R,SP,IF"
     # args.compute_objectives = "'SBS:ABFTA'" #["SBS", "ABFTA"]
     # args.distance_metrics = ["HMOM"] * 2
