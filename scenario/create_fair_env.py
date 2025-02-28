@@ -277,7 +277,6 @@ def create_job_env(args):
 
 def create_fairness_framework_env(args):
     if args.vsc == 1:
-        args.objectives = args.objectives[1:len(args.objectives) - 1]
         result_dir = VSC_SAVE_DIR
     else:
         result_dir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults"
@@ -310,12 +309,11 @@ def create_fairness_framework_env(args):
     # Check for concatenated arguments for objectives and compute objectives
     _sep = ":"
 
-    if _sep in args.objectives:
-        args.objectives = args.objectives.split(_sep)
-    if _sep in args.compute_objectives:
-        args.compute_objectives = args.compute_objectives.split(_sep)
+    if len(args.objectives) == 1 and _sep in args.objectives[0]:
+        args.objectives = args.objectives[0].split(_sep)
+    if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
+        args.compute_objectives = args.compute_objectives[0].split(_sep)
     all_args_objectives = args.objectives + args.compute_objectives
-
     ordered_objectives = sorted(all_args_objectives,
                                 key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])
     args.objectives = [i for i, o in enumerate(ordered_objectives) if o in args.objectives]
