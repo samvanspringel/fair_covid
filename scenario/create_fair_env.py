@@ -308,11 +308,15 @@ def create_fairness_framework_env(args):
     sort_objectives = {o: i for i, o in enumerate(ALL_OBJECTIVES)}
     # Check for concatenated arguments for objectives and compute objectives
     _sep = ":"
-    if len(args.objectives) == 1 and _sep in args.objectives[0]:
-        args.objectives = args.objectives[0].split(_sep)
-    if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
-        args.compute_objectives = args.compute_objectives[0].split(_sep)
+
+    if _sep in args.objectives:
+        args.objectives = args.objectives.split(_sep)
+        print("OBJECTIVES:", args.objectives)
+    if _sep in args.compute_objectives:
+        args.compute_objectives = args.compute_objectives.split(_sep)
+        print("CO", args.compute_objectives)
     all_args_objectives = args.objectives + args.compute_objectives
+
     ordered_objectives = sorted(all_args_objectives,
                                 key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])
     args.objectives = [i for i, o in enumerate(ordered_objectives) if o in args.objectives]
@@ -393,11 +397,11 @@ def create_fairness_framework_env(args):
 
 fMDP_parser = argparse.ArgumentParser(description='fMDP_parser', add_help=False)
 #
-fMDP_parser.add_argument('--objectives', default=['R', 'SP'],
+fMDP_parser.add_argument('--objectives', default="R_ARI:R_ARH:R_SB_W:R_SB_S:R_SB_L",
                          type=str, nargs='+', help='Abbreviations of the fairness notions to optimise, one or more of: '
                                                    f'{parser_all_objectives}. Can be supplied as a single string, with'
                                                    f'the arguments separated by a colon, e.g., "R:SP"')
-fMDP_parser.add_argument('--compute_objectives', default=['EO', 'OAE', 'PP', 'IF', 'CSC'],
+fMDP_parser.add_argument('--compute_objectives', default="SBS:ABFTA",
                          type=str, nargs='*', help='Abbreviations of the fairness notions to compute, '
                                                    f'in addition to the ones being optimised: {parser_all_objectives}'
                                                    f' Can be supplied as a single string, with the arguments separated '

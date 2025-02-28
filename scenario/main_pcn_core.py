@@ -564,6 +564,7 @@ if __name__ == '__main__':
     parser.add_argument('--model', default='conv1dbig', type=str, help='dense(big|small)')
 
     args = parser.parse_args()
+
     no_save = False
     args.wandb = 0
 
@@ -583,9 +584,9 @@ if __name__ == '__main__':
     # args.er_size = 200
     # args.model_updates = 10
     #
-    args.objectives = ["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L"]  # , "IF", "IF"]
+    args.objectives = "R_ARI:R_ARH:R_SB_W:R_SB_S:R_SB_L" #["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L"]  # , "IF", "IF"]
     # args.objectives = "R,SP,IF"
-    args.compute_objectives = ["SBS", "ABFTA"]
+    args.compute_objectives = "SBS:ABFTA" #["SBS", "ABFTA"]
     # args.distance_metrics = ["HMOM"] * 2
     # args.distance_metrics = ["braycurtis", "HMOM"]#, "HEOM"]
     #args.steps = 5000
@@ -609,7 +610,7 @@ if __name__ == '__main__':
     on_vsc = args.vsc == 1
 
     env_type = "covid"
-    is_job_hiring = env_type == "covid"
+    is_covid = env_type == "covid"
     n_evaluations = 10
 
     env, logdir, ref_point, scaling_factor, max_return = create_fairness_framework_env(args)
