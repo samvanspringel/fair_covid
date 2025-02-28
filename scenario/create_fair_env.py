@@ -277,6 +277,7 @@ def create_job_env(args):
 
 def create_fairness_framework_env(args):
     if args.vsc == 1:
+        args.objectives = args.objectives[1:len(args.objectives) - 1]
         result_dir = VSC_SAVE_DIR
     else:
         result_dir = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults"
