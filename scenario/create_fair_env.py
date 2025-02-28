@@ -164,33 +164,6 @@ class HistoryEnv(gym.Wrapper):
 
 
 def create_covid_env(args):
-    import torch
-    import argparse
-
-    parser = argparse.ArgumentParser(description='PCN')
-    parser.add_argument('--objectives', default=[1, 5], type=int, nargs='+',
-                        help='index for ari, arh, pw, ps, pl, ptot')
-    parser.add_argument('--env', default='ode', type=str, help='ode or binomial')
-    parser.add_argument('--action', default='continuous', type=str, help='discrete, multidiscrete or continuous')
-    parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
-    parser.add_argument('--steps', default=3e5, type=float, help='total timesteps')
-    parser.add_argument('--batch', default=256, type=int, help='batch size')
-    parser.add_argument('--model-updates', default=50, type=int,
-                        help='number of times the model is updated at every training iteration')
-    parser.add_argument('--top-episodes', default=200, type=int,
-                        help='top-n episodes used to compute target-return and horizon. \
-                  Initially fill ER with n random episodes')
-    parser.add_argument('--n-episodes', default=10, type=int,
-                        help='number of episodes to run between each training iteration')
-    parser.add_argument('--er-size', default=400, type=int,
-                        help='max size (in episodes) of the ER buffer')
-    parser.add_argument('--threshold', default=0.02, type=float, help='crowding distance threshold before penalty')
-    parser.add_argument('--noise', default=0.0, type=float, help='noise applied on target-return on batch-update')
-    parser.add_argument('--model', default='conv1dsmall', type=str, help='conv1d(big|small), dense(big|small)')
-    parser.add_argument('--clip_grad_norm', default=None, type=float, help='clip gradient norm during pcn update')
-    args = parser.parse_args()
-    print(args)
-
     scale = np.array([800000, 11000, 50., 20, 50, 120])
 
     env_type = 'ODE'
@@ -296,7 +269,6 @@ def create_fairness_framework_env(args):
     #
     logdir += datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S/')
     os.makedirs(logdir, exist_ok=True)
-    print(logdir)
 
     seed = args.seed
     random.seed(seed)
@@ -314,17 +286,12 @@ def create_fairness_framework_env(args):
     if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
         args.compute_objectives = args.compute_objectives[0].split(_sep)
 
-    print("Before objectives:", args.objectives)
-    print("Before computeobj:", args.compute_objectives)
-
     all_args_objectives = args.objectives + args.compute_objectives
 
     ordered_objectives = sorted(all_args_objectives,
                                 key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])
-    print("Before ordered:", ordered_objectives)
     args.objectives = [i for i, o in enumerate(ordered_objectives) if o in args.objectives]
 
-    print("Parsed objectives:", args.objectives)
     # Check for concatenated distance metrics
     ind_notions = [n for n in all_args_objectives if isinstance(get_objective(OBJECTIVES_MAPPING[n]), IndividualNotion)]
     if len(args.distance_metrics) == 1:

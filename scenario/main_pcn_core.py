@@ -540,6 +540,11 @@ def train_fair(env,
 
 
 if __name__ == '__main__':
+    import sys
+
+    sys.stdout = sys.__stdout__  # Ensure prints go to terminal
+    sys.stderr = sys.__stderr__  # Ensure errors go to terminal
+
     import time
 
     t_start = time.time()
