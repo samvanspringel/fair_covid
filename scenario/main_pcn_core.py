@@ -612,7 +612,7 @@ if __name__ == '__main__':
         print(f"{arg}: {value}")
 
     arg_use_wandb = args.wandb == 1
-    on_vsc = args.vsc == 1
+    on_vsc = args.vsc == 0
 
     env_type = "covid"
     is_covid = env_type == "covid"
