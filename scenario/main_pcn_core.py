@@ -678,7 +678,7 @@ if __name__ == '__main__':
     args.wandb = 0
 
     # ########
-    args.vsc = 1
+    # args.vsc = 1
     #
     # args.steps = 1000
     # args.window = 1000
