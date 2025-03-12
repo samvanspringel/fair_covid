@@ -720,7 +720,7 @@ if __name__ == '__main__':
 
     env_type = "covid"
     is_covid = env_type == "covid"
-    n_evaluations = 1
+    n_evaluations = 10
 
     env, logdir, ref_point, scaling_factor, max_return = create_fairness_framework_env(args)
 
