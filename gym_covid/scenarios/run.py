@@ -1,10 +1,17 @@
 import sys
 import os
-sys.path.append(os.getcwd())
+
+
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import matplotlib.pyplot as plt
 import argparse
 import pandas as pd
 import datetime
+
+# Now you can import it
+from gym_covid import *
+from scenario.create_fair_env import *
 
 
 def plot_states(states, alpha):
@@ -58,16 +65,20 @@ def simulate_scenario(env, scenario):
     rewards = []
     today = datetime.date(2020, 3, 1)
     days = []
-
     while not d:
         # at every timestep check if there are new restrictions
         s = scenario[scenario['timestep'] == timestep]
         if len(s):
             print(f'timesteps {timestep}: {s["phase"]}')
             # found new restrictions
-            action = np.array([s['work'].iloc[0], s['school'].iloc[0], s['leisure'].iloc[0]])
+            action = np.ones(3)
 
         s, r, d, info = env.step(action)
+        df = env.state_df()[0].to_string()
+        #print(df)
+        print(s[1].shape)
+        exit(1)
+
         # state is tuple (compartments, events, prev_action), only keep compartments
         states.append(s[1])
         timestep += 1
@@ -77,15 +88,16 @@ def simulate_scenario(env, scenario):
         for i in range(7):
             days.append(datetime.date(2020, 3, 1)+datetime.timedelta(days=(timestep-1)*7+i))
     # array of shape [Week DayOfWeek Compartment AgeGroup]
-
     states = np.stack(states, 0)
-    print(ret)
+    #print(ret)
     # reshape to [Day Compartment AgeGroup]
     states =  np.array(states).reshape(states.shape[0]*states.shape[1], *states.shape[2:])
-
+    print(states)
+    #exit(1)
     with open('/tmp/run.csv', 'a') as f:
         f.write('dates,i_hosp_new,i_icu_new,d_new,p_w,p_s,p_l')
         i_hosp_new = states[:,-3].sum(axis=1)
+        print(i_hosp_new)
         i_icu_new = states[:,-2].sum(axis=1)
         d_new = states[:,-1].sum(axis=1)
         # actions.append(actions[-1])
@@ -101,7 +113,6 @@ def simulate_scenario(env, scenario):
 
 if __name__ == '__main__':
     import gym
-    import envs
     from gym.wrappers import TimeLimit
     import numpy as np
     
@@ -118,14 +129,17 @@ if __name__ == '__main__':
     np.random.seed(seed=args.seed)
 
     # load the environments
+    env_type = 'ODE'
+    budget = 5
     bin_env = gym.make('BECovidBinomialContinuous-v0')
-    ode_env = gym.make('BECovidODEContinuous-v0')
+    ode_env = gym.make(f'BECovidWithLockdown{env_type}Budget{budget}Continuous-v0')
     days_per_timestep = bin_env.days_per_timestep
 
     # simulation timesteps in weeks
     start = datetime.date(2020, 3, 1)
     end = datetime.date(2020, 9, 5)
     timesteps = round((end-start).days/days_per_timestep)
+    print("TIMESTEPS:", timesteps)
 
     # apply timestep limit to environments
     bin_env = TimeLimit(bin_env, timesteps)
@@ -136,13 +150,13 @@ if __name__ == '__main__':
     scenario['date'] = scenario['date'].astype(str)
     to_timestep = lambda d: round((datetime.datetime.strptime(d, '%Y-%m-%d').date()-start).days/days_per_timestep)
     scenario['timestep'] = [to_timestep(d) for d in scenario['date']]
-    print(scenario)
+    print(ode_env)
 
     states_per_run = []
     for run in range(runs):
-        states = simulate_scenario(bin_env, scenario)
+        states = simulate_scenario(ode_env, scenario)
         states_per_run.append(states)
         
     # plots assume 3 compartments
     ode_states = simulate_scenario(ode_env, scenario)
-    plot_simulation(states_per_run, ode_states, bin_env.datapoints)
+    plot_simulation(states_per_run, ode_states, ode_env.datapoints)

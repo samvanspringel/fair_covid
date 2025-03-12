@@ -37,7 +37,6 @@ class BudgetActionWrapper(gym.Wrapper):
 
         ns, r, d, info = super(BudgetActionWrapper, self).step(action)
         info['action'] = action.copy()
-
         # augment next state
         ns = self.augment_state(ns)
         return ns, r, d, info

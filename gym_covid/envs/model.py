@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.integrate import odeint
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 from numba.experimental import jitclass
 from numba import types, jit

@@ -106,7 +106,7 @@ class ScaleRewardEnv(gym.RewardWrapper):
         self.scale = scale
 
     def reward(self, reward):
-        return (reward - self.min) / self.scale
+        return (reward - self.min)/self.scale
 
 
 class TodayWrapper(gym.Wrapper):
@@ -115,19 +115,29 @@ class TodayWrapper(gym.Wrapper):
 
     def reset(self):
         s = super(TodayWrapper, self).reset()
-        ss, se, sa = s[1:]  # s TODO changed!
-        return (ss[-1].T, se[-1], sa)
-
+        if len(s) == 4:
+            sb, ss, se, sa = s
+            return (sb, ss[-1].T, se[-1], sa)
+        else:
+            ss, se, sa = s
+            return (ss[-1].T, se[-1], sa)
     # step function of covid env returns simulation results of every day of timestep
     # only keep current day
     # also discard first reward
     def step(self, action):
         s, r, d, i = super(TodayWrapper, self).step(action)
-        ss, se, sa = s[1:]  # TODO changed!
+
         # sum all the social burden objectives together:
         p_tot = r[2:].sum()
         r = np.concatenate((r, p_tot[None]))
-        return (ss[-1].T, se[-1], sa), r, d, i
+        if len(s) == 4:
+            sb, ss, se, sa = s
+            s = (sb, ss[-1].T, se[-1], sa)
+        else:
+            ss, se, sa = s
+            s = (ss[-1].T, se[-1], sa)
+
+        return s, r, d, i
 
 
 class HistoryEnv(gym.Wrapper):
@@ -167,12 +177,25 @@ def create_covid_env(args):
     scale = np.array([800000, 11000, 50., 20, 50, 120])
 
     env_type = 'ODE'
+
+    if not args:
+        budget = 5
+        env = gym.make(f'BECovidWithLockdown{env_type}Budget{budget}Continuous-v0')
+
+        nA = np.prod(env.action_space.shape)
+
+        env.nA = nA
+
+        return env
+
+
     if args.action == 'discrete':
         env = gym.make(f'BECovidWithLockdown{env_type}Discrete-v0')
         nA = env.action_space.n
     else:
         budget = 5
         env = gym.make(f'BECovidWithLockdown{env_type}Budget{budget}Continuous-v0')
+        #env = gym.make(f'BECovidWithLockdown{env_type}Continuous-v0')
         if args.action == 'multidiscrete':
             env = multidiscrete_env(env)
             nA = env.action_space.nvec.sum()
@@ -260,7 +283,7 @@ def create_fairness_framework_env(args):
     is_covid = env_type == "covid"
     # Job hiring
     if is_covid:
-        logdir = f"{result_dir}/covid/"
+        logdir = f"{result_dir}/covid/{args.log_dir}/"
         env = create_covid_env(args)
     else:
         logdir = f"{result_dir}/job_hiring/"
@@ -268,6 +291,7 @@ def create_fairness_framework_env(args):
     print(env)
     #
     logdir += datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S/')
+
     os.makedirs(logdir, exist_ok=True)
 
     seed = args.seed
@@ -279,14 +303,17 @@ def create_fairness_framework_env(args):
     sort_objectives = {o: i for i, o in enumerate(ALL_OBJECTIVES)}
     # Check for concatenated arguments for objectives and compute objectives
     _sep = ":"
-
-    if len(args.objectives) == 1 and _sep in args.objectives[0]:
-        args.objectives = args.objectives[0].split(_sep)
-        print(args.objectives)
-    if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
-        args.compute_objectives = args.compute_objectives[0].split(_sep)
+    #print(f"not parsed objectives: {args.compute_objectives}")
+    if isinstance(args.objectives, str) and _sep in args.objectives:
+        args.objectives = args.objectives.split(_sep)
+    if isinstance(args.compute_objectives, str) and _sep in args.compute_objectives:
+        args.compute_objectives = args.compute_objectives.split(_sep)  # No `[0]` needed
 
     all_args_objectives = args.objectives + args.compute_objectives
+    #print(all_args_objectives)
+
+    print(f"Parsed objectives: {args.objectives}")
+    print(f"Parsed objectives: {args.compute_objectives}")
 
     ordered_objectives = sorted(all_args_objectives,
                                 key=lambda o: SORTED_OBJECTIVES[get_objective(OBJECTIVES_MAPPING[o])])

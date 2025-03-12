@@ -128,11 +128,6 @@ class EpiEnv(gym.Env):
             # update state
             s = s_n
 
-            h = self.model.get_hospitalization_risk()
-
-            S = s[0, :]
-            R = s[8, :]
-
             # C_diff added so it can be accessed for fairness
             self.C_diff_fairness = C_diff
 
@@ -145,8 +140,10 @@ class EpiEnv(gym.Env):
         r_sr_s = r_sr[3]
         r_sr_l = r_sr[4]+r_sr[5]
 
+
         # next-state , reward, terminal?, info
         # provide action as proxy for current SCM, impacts progression of epidemic
+        # s,
         return (state_n, event_n, action.copy()), np.array([r_ari, r_arh, r_sr_w, r_sr_s, r_sr_l]), False, {}
 
     def similarity_metric(self, state1, state2):

@@ -31,19 +31,27 @@ class TodayWrapper(gym.Wrapper):
 
     def reset(self):
         s = super(TodayWrapper, self).reset()
-        ss, se, sa = s[1:]
-        return (ss[-1].T, se[-1], sa)
-
+        if len(s) == 4:
+            sb, ss, se, sa = s
+            return (sb, ss[-1].T, se[-1], sa)
+        else:
+            ss, se, sa = s
+            return (ss[-1].T, se[-1], sa)
     # step function of covid env returns simulation results of every day of timestep
     # only keep current day
     # also discard first reward
     def step(self, action):
-        s, r, d, _ = super(TodayWrapper, self).step(action)
-        ss, se, sa = s[1:]
+        s, r, d, i = super(TodayWrapper, self).step(action)
         # sum all the social burden objectives together:
         p_tot = r[2:].sum()
         r = np.concatenate((r, p_tot[None]))
-        return (ss[-1].T, se[-1], sa), r, d, _
+        if len(s) == 4:
+            sb, ss, se, sa = s
+            s = (sb, ss[-1].T, se[-1], sa)
+        else:
+            ss, se, sa = s
+            s = (ss[-1].T, se[-1], sa)
+        return s, r, d, i
 
 
 class HistoryEnv(gym.Wrapper):

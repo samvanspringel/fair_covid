@@ -16,7 +16,7 @@ import dash_bootstrap_components as dbc
 objectives = ["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L", "SB_SUM"]
 
 # Directory where model files (model_*.pt) are stored:
-MODEL_DIR = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/covid/2024-12-12_12-43-27/"
+MODEL_DIR = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/cluster/2025-03-04_13-01-52/"
 
 def list_models():
     # List all model_i.pt files from MODEL_DIR
@@ -25,9 +25,17 @@ def list_models():
     return sorted(model_files)
 
 def plot_compartment(list_compartment, label):
+    """
+    Creates a line plot for each age group across time steps.
+    The list_compartment argument is expected to be a list of lists
+    where each sublist corresponds to one time step, and each item
+    in that sublist is the compartment value for a particular age group.
+    """
     list_by_age_group = list(zip(*list_compartment))
-    age_groups = ["[0, 10[", "[10, 20[", "[20, 30[", "[30, 40[", "[40, 50[", "[50, 60[", "[60, 70[", "[70, 80[",
-                  "[80, 90[", "[90, inf["]
+    age_groups = [
+        "[0, 10[", "[10, 20[", "[20, 30[", "[30, 40[", "[40, 50[",
+        "[50, 60[", "[60, 70[", "[70, 80[", "[80, 90[", "[90, inf["
+    ]
 
     plt.figure(figsize=(10, 6))
     for age_group, values in zip(age_groups, list_by_age_group):
@@ -46,7 +54,7 @@ def plot_compartment(list_compartment, label):
     plt.close()
     img.seek(0)
     encoded = base64.b64encode(img.read()).decode("utf-8")
-    return "data:image/png;base64,{}".format(encoded)
+    return f"data:image/png;base64,{encoded}"
 
 def plot_actions(all_actions):
     action_labels = ["Reduction Work", "Reduction School", "Reduction Leisure"]
@@ -70,22 +78,37 @@ def plot_actions(all_actions):
     plt.close()
     img.seek(0)
     encoded = base64.b64encode(img.read()).decode("utf-8")
-    return "data:image/png;base64,{}".format(encoded)
+    return f"data:image/png;base64,{encoded}"
 
 def load_parameters_from_file():
     df = pd.read_csv(MODEL_DIR + "pcn_log.csv")
     reference = df.iloc[-1]
 
-    objectives_desired_returns = [reference["return_0_desired"],
-                                  reference["return_1_desired"],
-                                  reference["return_2_desired"],
-                                  reference["return_3_desired"],
-                                  reference["return_4_desired"],
-                                  reference["return_5_desired"]]
+    objectives_desired_returns = [
+        reference["return_0_desired"],
+        reference["return_1_desired"],
+        reference["return_2_desired"],
+        reference["return_3_desired"],
+        reference["return_4_desired"],
+        reference["return_5_desired"]
+    ]
     horizon = reference["desired_horizon"]
     desired_horizon = reference["horizon_distance"]
 
     return objectives_desired_returns, horizon, desired_horizon
+
+def load_csv_column(csv_path, column_name):
+    """
+    Loads a CSV that is assumed to have rows for each age group over multiple time steps.
+    For each time step (grouped by 'day'), collect the values in `column_name`.
+    Returns a list of lists, where each inner list is one time step across all age groups.
+    """
+    df = pd.read_csv(csv_path)
+    grouped = df.groupby('dates')
+    list_compartment = []
+    for _, frame in grouped:
+        list_compartment.append(frame[column_name].tolist())
+    return list_compartment
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
@@ -145,12 +168,21 @@ app.layout = dbc.Container([
 
         # Plots Column
         dbc.Col([
-            html.H3("Hospitalizations Plot"),
+            html.H3("Hospital Admissions (I_hosp_new)"),
             html.Img(id="hospitalization-plot", style={"width": "50%", "height": "auto"}),
-            html.H3("Infections Plot"),
+
+            html.H3("ICU Admissions (I_icu_new)"),
             html.Img(id="infections-plot", style={"width": "50%", "height": "auto"}),
+
             html.H3("Actions Plot"),
             html.Img(id="actions-plot", style={"width": "50%", "height": "auto"}),
+
+            # NEW: CSV comparison plots
+            html.H3("Hospital CSV Plot"),
+            html.Img(id="hospital-csv-plot", style={"width": "50%", "height": "auto"}),
+
+            html.H3("ICU CSV Plot"),
+            html.Img(id="icu-csv-plot", style={"width": "50%", "height": "auto"}),
         ], width=8)
     ]),
 
@@ -168,8 +200,8 @@ app.layout = dbc.Container([
 ], fluid=True)
 
 @app.callback(
-    [Output("obj-input-"+str(i), "value") for i in range(len(objectives))] +
-    [Output("horizon-input", "value"), Output("desired_horizon-input", "value")],
+    [Output("obj-input-"+str(i), "value") for i in range(len(objectives))]
+    + [Output("horizon-input", "value"), Output("desired_horizon-input", "value")],
     [Input("load-button", "n_clicks")]
 )
 def load_parameters(n_clicks):
@@ -181,23 +213,29 @@ def load_parameters(n_clicks):
         return [no_update]*(len(objectives)+2)
 
 @app.callback(
-    [Output("hospitalization-plot", "src"),
-     Output("infections-plot", "src"),
-     Output("actions-plot", "src"),
-     Output("last-df", "data"),
-     Output("last-df", "columns"),
-     Output("other-df", "data"),
-     Output("other-df", "columns")],
+    [
+        Output("hospitalization-plot", "src"),
+        Output("infections-plot", "src"),
+        Output("actions-plot", "src"),
+        Output("hospital-csv-plot", "src"),
+        Output("icu-csv-plot", "src"),
+        Output("last-df", "data"),
+        Output("last-df", "columns"),
+        Output("other-df", "data"),
+        Output("other-df", "columns")
+    ],
     [Input("run-button", "n_clicks")],
-    [State("model-dropdown", "value")] + [State(f"obj-input-{i}", "value") for i in range(len(objectives))] +
-    [State("horizon-input", "value")] + [State("desired_horizon-input", "value")]
+    [State("model-dropdown", "value")]
+    + [State(f"obj-input-{i}", "value") for i in range(len(objectives))]
+    + [State("horizon-input", "value")]
+    + [State("desired_horizon-input", "value")]
 )
 def run_simulation(n_clicks, model_file, *args):
-    # args contains the objectives values followed by horizon and desired horizon
+    # args: objectives values + horizon + desired horizon
     if n_clicks == 0:
         # No run yet, return empty
         empty_img = ""
-        return empty_img, empty_img, empty_img, [], [], [], []
+        return empty_img, empty_img, empty_img, empty_img, empty_img, [], [], [], []
 
     vals = args[0:6]
     horizon = args[6]
@@ -223,28 +261,42 @@ def run_simulation(n_clicks, model_file, *args):
     for t in range(int(horizon)):
         action = choose_action(pcn, obs, desired_return, desired_horizon, eval=True)
         obs, reward, done, info = env.step(action)
-        state_df = env.state_df()
+
+        state_df = env.state_df()[0]
         last_state_df = state_df
-        hospitalizations = state_df["I_sev"]
-        infections = state_df["I_presym"]
-        all_hospitalizations.append(hospitalizations)
-        all_infections.append(infections)
+
+        # Replaced "I_sev" -> "I_hosp_new" and "I_presym" -> "I_icu_new"
+        hospitalizations = state_df["I_hosp_new"]
+        print(hospitalizations)
+        infections = state_df["I_icu_new"]
+        hospitalizations_value = hospitalizations.sum()
+        infections_value = infections.sum()
+
+        all_hospitalizations.append([hospitalizations_value])
+        all_infections.append([infections_value])
+
+        #all_hospitalizations.append(hospitalizations)
+        #all_infections.append(infections)
         all_actions.append(action)
 
-        print(state_df)
 
-    hospitalizations_plot = plot_compartment(all_hospitalizations, "I_sev")
-    infections_plot = plot_compartment(all_infections, "I_presym")
+    hospitalizations_plot = plot_compartment(all_hospitalizations, "I_hosp_new")
+    infections_plot = plot_compartment(all_infections, "I_icu_new")
     actions_plot = plot_actions(all_actions)
+
+    # CSV comparison data
+    csv_hosp_data = load_csv_column("/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/run_0.csv", "i_hosp_new")
+    csv_icu_data = load_csv_column("/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/run_0.csv", "i_icu_new")
+    hospital_csv_plot = plot_compartment(csv_hosp_data, "I_hosp_new (CSV)")
+    icu_csv_plot = plot_compartment(csv_icu_data, "I_icu_new (CSV)")
 
     # Convert last_state_df to data and columns
     last_df_data = last_state_df.to_dict('records')
     last_df_columns = [{"name": col, "id": col} for col in last_state_df.columns]
 
+    # Example "other_df"
     df = pd.read_csv(MODEL_DIR + "pcn_log.csv")
     reference = df.iloc[-1]
-
-
     horizon = reference["desired_horizon"]
 
     other_df = pd.DataFrame({
@@ -254,7 +306,17 @@ def run_simulation(n_clicks, model_file, *args):
     other_df_data = other_df.to_dict('records')
     other_df_columns = [{"name": col, "id": col} for col in other_df.columns]
 
-    return hospitalizations_plot, infections_plot, actions_plot, last_df_data, last_df_columns, other_df_data, other_df_columns
+    return (
+        hospitalizations_plot,
+        infections_plot,
+        actions_plot,
+        hospital_csv_plot,
+        icu_csv_plot,
+        last_df_data,
+        last_df_columns,
+        other_df_data,
+        other_df_columns
+    )
 
 if __name__ == "__main__":
     app.run_server(debug=True)
