@@ -1,6 +1,0 @@
-numpy
-matplotlib
-pandas
-datetime
-mesa
-currencyconverter

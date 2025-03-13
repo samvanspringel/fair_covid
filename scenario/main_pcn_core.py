@@ -17,8 +17,6 @@ from agent.pcn.logger import Logger
 from scenario.create_fair_env import *
 from fairness.fairness_framework import ExtendedfMDP
 from loggers.logger import AgentLogger, LeavesLogger, TrainingPCNLogger, EvalLogger
-from scenario.fraud_detection.env import NUM_FRAUD_FEATURES
-from scenario.job_hiring.env import NUM_JOB_HIRING_FEATURES
 
 
 
