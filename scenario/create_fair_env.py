@@ -303,11 +303,19 @@ def create_fairness_framework_env(args):
     sort_objectives = {o: i for i, o in enumerate(ALL_OBJECTIVES)}
     # Check for concatenated arguments for objectives and compute objectives
     _sep = ":"
-    #print(f"not parsed objectives: {args.compute_objectives}")
-    if isinstance(args.objectives, str) and _sep in args.objectives:
-        args.objectives = args.objectives.split(_sep)
-    if isinstance(args.compute_objectives, str) and _sep in args.compute_objectives:
-        args.compute_objectives = args.compute_objectives.split(_sep)  # No `[0]` needed
+
+    # TODO to run locally
+    # if isinstance(args.objectives, str) and _sep in args.objectives:
+    #     args.objectives = args.objectives.split(_sep)
+    # if isinstance(args.compute_objectives, str) and _sep in args.compute_objectives:
+    #     args.compute_objectives = args.compute_objectives.split(_sep)  # No `[0]` needed
+
+    # TODO cluster
+    if len(args.objectives) == 1 and _sep in args.objectives[0]:
+        args.objectives = args.objectives[0].split(_sep)
+        print(args.objectives)
+    if len(args.compute_objectives) == 1 and _sep in args.compute_objectives[0]:
+        args.compute_objectives = args.compute_objectives[0].split(_sep)
 
     all_args_objectives = args.objectives + args.compute_objectives
     #print(all_args_objectives)

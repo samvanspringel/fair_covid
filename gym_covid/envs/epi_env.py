@@ -50,6 +50,11 @@ class EpiEnv(gym.Env):
         self.today = datetime.date(2020, 3, 1)
 
         self.events = {}
+
+        # TODO added for plotting
+        self.current_action = np.zeros(3)
+        self.current_events_n = np.zeros(7, dtype=bool)
+
         # include school holiday
         for holiday_start, holiday_end in ((datetime.date(2020, 7, 1), datetime.date(2020, 8, 31)),
                                            (datetime.date(2020, 11, 2), datetime.date(2020, 11, 8)),
@@ -60,7 +65,7 @@ class EpiEnv(gym.Env):
                 self.events[day] = school_holidays
 
         self.previous_state = None
-
+        self.current_state_n = np.empty((self.days_per_timestep,) + self.observation_space.shape)
         self.C_diff_fairness = None
 
 
@@ -140,6 +145,10 @@ class EpiEnv(gym.Env):
         r_sr_s = r_sr[3]
         r_sr_l = r_sr[4]+r_sr[5]
 
+        # TODO added for plotting
+        self.current_state_n = state_n[-1].T
+        self.current_action = action
+        self.current_events_n = event_n[-1]
 
         # next-state , reward, terminal?, info
         # provide action as proxy for current SCM, impacts progression of epidemic

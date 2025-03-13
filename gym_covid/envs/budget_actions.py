@@ -11,10 +11,13 @@ class BudgetActionWrapper(gym.Wrapper):
         self._action_margin = 0.05
 
     def augment_state(self, state):
+        print("STATE IN BUDGET", state)
+        print("BUDGET", self._budget_left)
         if type(state) == tuple:
             state = (self._budget_left.copy(), *state)
         else:
             state = (self._budget_left.copy(), state)
+        print("STATE AFTER BUDGET", state)
         return state
 
     def reset(self):

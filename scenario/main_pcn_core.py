@@ -195,6 +195,7 @@ class CovidModel(nn.Module):
         # commands are scaled by a fixed factor
         c = c*self.scaling_factor
         # if self.sb_emb is not None:
+
         sb, ss, se, sa = state
         s = self.ss_emb(ss.float())*self.se_emb(se.float())*self.sa_emb(sa.float())*self.sb_emb(sb.float())
         # else:
@@ -681,22 +682,22 @@ if __name__ == '__main__':
     # args.steps = 1000
     # args.window = 1000
     # args.team_size = 100
-    # args.episode_length = args.team_size * 10
+    args.episode_length = 3
     # args.env = "fraud"
     # args.n_transactions = 200
     # args.fraud_proportion = 0.20
     #
-    # args.top_episodes = 50
-    # args.n_episodes = 50
+    args.top_episodes = 5
+    args.n_episodes = 5
     # args.er_size = 200
-    # args.model_updates = 10
+    args.model_updates = 2
     #
     # args.objectives = ["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L"]  # , "IF", "IF"]
     # args.objectives = "R,SP,IF"
     # args.compute_objectives = ['SBS:ABFTA'] #["SBS", "ABFTA"]
     # args.distance_metrics = ["HMOM"] * 2
     # args.distance_metrics = ["braycurtis", "HMOM"]#, "HEOM"]
-    # args.steps = 1000
+    args.steps = 1000
     # args.window = 1000
     # args.bias = 1
     # args.ignore_sensitive = True
