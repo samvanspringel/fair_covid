@@ -291,6 +291,7 @@ def create_fairness_framework_env(args):
     print(env)
     #
     logdir += datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S/')
+    print(logdir)
 
     os.makedirs(logdir, exist_ok=True)
 

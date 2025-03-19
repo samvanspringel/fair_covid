@@ -9,7 +9,6 @@ import sys
 import glob
 import pandas as pd
 
-print(sys.argv)
 pre = sys.argv[1]
 
 
@@ -262,10 +261,8 @@ if __name__ == '__main__':
             with open(args.save_pf + '.npy', 'wb') as f:
                 np.save(f, nd)
     else:
-        print(all_runs)
         nd = non_dominated_across_runs(all_runs)
         warnings.warn('not using approximated pareto front')
-
 
     plot_pareto_front(all_runs)
     # hv = common_hypervolume(all_runs)

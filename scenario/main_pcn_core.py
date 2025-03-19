@@ -9,6 +9,8 @@ import wandb
 
 import sys
 
+from pygmo.core import hypervolume
+
 sys.path.append("./")  # for command-line execution to find the other packages (e.g. envs)
 
 from agent.pcn.pcn_core import epsilon_metric, non_dominated, compute_hypervolume, add_episode, Transition
@@ -16,7 +18,8 @@ from agent.pcn.pcn import choose_commands
 from agent.pcn.logger import Logger
 from scenario.create_fair_env import *
 from fairness.fairness_framework import ExtendedfMDP
-from loggers.logger import AgentLogger, LeavesLogger, TrainingPCNLogger, EvalLogger
+# TODO revert 18/03/2025 14:46
+#from loggers.logger import AgentLogger, LeavesLogger, TrainingPCNLogger, EvalLogger
 
 
 
@@ -266,13 +269,13 @@ def run_episode_fairness(env, model, desired_return, desired_horizon, max_return
     t = current_t
     log_entries = []
     if eval and eval_axes:
-        path = agent_logger.path_eval_axes
+        #path = agent_logger.path_eval_axes
         status = "eval_axes"
     elif eval:
-        path = agent_logger.path_eval
+        #path = agent_logger.path_eval
         status = "eval"
     else:
-        path = agent_logger.path_train
+        #path = agent_logger.path_train
         status = "train"
     while not done:
         curr_obs = env.normalise_state(obs) if normalise_state else obs
@@ -298,15 +301,15 @@ def run_episode_fairness(env, model, desired_return, desired_horizon, max_return
         desired_horizon = np.float32(max(desired_horizon - 1, 1.))
         #
         next_t = time.time()
-        if not eval_axes or log_coverage_set_only or not (eval and log_compact):
-            log_entries.append(
-                agent_logger.create_entry(current_ep, t, obs, action, reward, done, info, next_t - curr_t,
-                                          status))
+        # if not eval_axes or log_coverage_set_only or not (eval and log_compact):
+        #     log_entries.append(
+        #         agent_logger.create_entry(current_ep, t, obs, action, reward, done, info, next_t - curr_t,
+        #                                   status))
         curr_t = next_t
         t += 1
 
-    if eval or not (log_compact or log_coverage_set_only):
-        agent_logger.write_data(log_entries, path)
+    # if eval or not (log_compact or log_coverage_set_only):
+    #     agent_logger.write_data(log_entries, path)
     return transitions
 
 
@@ -468,27 +471,28 @@ def train_fair(env,
         objectives = tuple([i for i in range(len(ref_point))])
     total_episodes = n_er_episodes
     opt = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    if use_wandb:
-        logger = Logger(logdir=logdir)
-    agent_logger = AgentLogger(f"{logdir}/agent_log_e_replay.csv", f"{logdir}/agent_log_train.csv",
-                               f"{logdir}/agent_log_eval.csv", f"{logdir}/agent_log_eval_axes.csv")
+    logger = Logger(logdir=logdir)
+    # if use_wandb:
+    #     logger = Logger(logdir=logdir)
+    # agent_logger = AgentLogger(f"{logdir}/agent_log_e_replay.csv", f"{logdir}/agent_log_train.csv",
+    #                            f"{logdir}/agent_log_eval.csv", f"{logdir}/agent_log_eval_axes.csv")
     # leaves_logger = LeavesLogger(
     #     objective_names=env.obj_names if isinstance(env, ExtendedfMDP) else [f'o_{o}' for o in objectives])
-    all_obj = [i for i in range(len(ref_point))]
-    pcn_logger = TrainingPCNLogger(objectives=all_obj)
-    eval_logger = EvalLogger(objectives=all_obj)
+    # all_obj = [i for i in range(len(ref_point))]
+    # pcn_logger = TrainingPCNLogger(objectives=all_obj)
+    # eval_logger = EvalLogger(objectives=all_obj)
 
     # agent_logger.create_file(agent_logger.path_eval_axes)
-    if not log_coverage_set_only:
-        agent_logger.create_file(agent_logger.path_eval)
-    if not (log_compact or log_coverage_set_only):
-        agent_logger.create_file(agent_logger.path_train)
-        agent_logger.create_file(agent_logger.path_experience)
-
+    # if not log_coverage_set_only:
+    #     agent_logger.create_file(agent_logger.path_eval)
+    # if not (log_compact or log_coverage_set_only):
+    #     agent_logger.create_file(agent_logger.path_train)
+    #     agent_logger.create_file(agent_logger.path_experience)
+    #
     # leaves_logger.create_file(f"{logdir}/leaves_log.csv")
-    pcn_logger.create_file(f"{logdir}/pcn_log.csv")
-    if not log_coverage_set_only:
-        eval_logger.create_file(f"{logdir}/eval_log.csv")
+    # pcn_logger.create_file(f"{logdir}/pcn_log.csv")
+    # if not log_coverage_set_only:
+    #     eval_logger.create_file(f"{logdir}/eval_log.csv")
     n_checkpoints = 0
 
     # fill buffer with random episodes
@@ -516,9 +520,9 @@ def train_fair(env,
                            next_obs if normalise_state else next_obs.to_array(), done))
             next_t = time.time()
 
-            if not (log_compact or log_coverage_set_only):
-                log_entries.append(agent_logger.create_entry(ep, step, obs, action, reward, done, info, next_t - curr_t,
-                                                             status="e_replay"))
+            #if not (log_compact or log_coverage_set_only):
+            #    log_entries.append(agent_logger.create_entry(ep, step, obs, action, reward, done, info, next_t - curr_t,
+            #                                                 status="e_replay"))
             curr_t = next_t
 
             obs = n_obs
@@ -526,8 +530,8 @@ def train_fair(env,
         # add episode in-place
         print(f"Store episode {ep}, t {step}")
         add_episode(transitions, experience_replay, gamma=gamma, max_size=max_size, step=step)
-        if not (log_compact or log_coverage_set_only):
-            agent_logger.write_data(log_entries, agent_logger.path_experience)
+        #if not (log_compact or log_coverage_set_only):
+            #agent_logger.write_data(log_entries, agent_logger.path_experience)
 
     del log_entries
 
@@ -561,17 +565,17 @@ def train_fair(env,
                     logger.put('train/leaves', e_returns, step, f'{e_returns.shape[-1]}d')
                 else:
                     leaves = []
-                    # get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
-                    # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
-                    # leaves = np.array([(len(e[2]), e[2][0].reward)
-                    #                    for e in experience_replay[len(experience_replay) // 2:]])
-                    # e_lengths, e_returns = zip(*leaves)
-                    # print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
-                    # leaves = np.array([(len(e[2]), e[2][0].reward)
-                    #                    for e in experience_replay[len(experience_replay) // 2:]])
-                    # for er in e_returns:
-                    #     leaves.append(leaves_logger.create_entry(ep, step, er))
-                    # leaves_logger.write_data(leaves)
+                    #get all leaves, contain biggest elements, experience_replay got heapified in choose_commands
+                    print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
+                    leaves = np.array([(len(e[2]), e[2][0].reward)
+                                       for e in experience_replay[len(experience_replay) // 2:]])
+                    e_lengths, e_returns = zip(*leaves)
+                    print([(len(e[2]), e[2][0].reward) for e in experience_replay[len(experience_replay) // 2:]])
+                    leaves = np.array([(len(e[2]), e[2][0].reward)
+                                       for e in experience_replay[len(experience_replay) // 2:]])
+                    #for er in e_returns:
+                        #leaves.append(leaves_logger.create_entry(ep, step, er))
+                    #leaves_logger.write_data(leaves)
             # hv = hypervolume(e_returns[...,objectives]*-1)
             # hv_est = hv.compute(ref_point[objectives]*-1)
             # logger.put('train/hypervolume', hv_est, step, 'scalar')
@@ -582,7 +586,10 @@ def train_fair(env,
         returns = []
         horizons = []
         for _ in range(n_step_episodes):
-            transitions = run_episode_fairness(env, model, desired_return, desired_horizon, max_return, agent_logger,
+            # transitions = run_episode_fairness(env, model, desired_return, desired_horizon, max_return, agent_logger,
+            #                                    normalise_state=normalise_state, current_t=step, current_ep=ep,
+            #                                    log_compact=log_compact, log_coverage_set_only=log_coverage_set_only)
+            transitions = run_episode_fairness(env, model, desired_return, desired_horizon, max_return, logger,
                                                normalise_state=normalise_state, current_t=step, current_ep=ep,
                                                log_compact=log_compact, log_coverage_set_only=log_coverage_set_only)
             step += len(transitions)
@@ -602,13 +609,13 @@ def train_fair(env,
         # current coverage set
         nd_coverage_set, e_i = non_dominated(e_returns[:, objectives], return_indexes=True)
 
-        entry = pcn_logger.create_entry(ep, step, np.mean(loss), np.mean(entropy), desired_horizon,
-                                        np.linalg.norm(np.mean(horizons) - desired_horizon), np.mean(horizons), hv,
-                                        e_returns, nd_coverage_set,
-                                        np.mean(np.array(returns), axis=0), desired_return,
-                                        [np.linalg.norm(np.mean(np.array(returns)[:, o]) - desired_return[o]) for o in
-                                         range(len(desired_return))])
-        pcn_logger.write_data(entry)
+        # entry = pcn_logger.create_entry(ep, step, np.mean(loss), np.mean(entropy), desired_horizon,
+        #                                 np.linalg.norm(np.mean(horizons) - desired_horizon), np.mean(horizons), hv,
+        #                                 e_returns, nd_coverage_set,
+        #                                 np.mean(np.array(returns), axis=0), desired_return,
+        #                                 [np.linalg.norm(np.mean(np.array(returns)[:, o]) - desired_return[o]) for o in
+        #                                  range(len(desired_return))])
+        # pcn_logger.write_data(entry)
 
         if step >= (n_checkpoints + 1) * total_steps / 10:
             if not no_save:  # torch.save gives errors when reached with memory profilers runs
@@ -621,7 +628,9 @@ def train_fair(env,
             # _, e_i = non_dominated(e_returns[:, objectives], return_indexes=True)
             e_returns = e_returns[e_i]
             e_lengths = e_lengths[e_i]
-            e_r, t_r = eval_(env, model, e_returns, e_lengths, max_return, agent_logger, ep, step,
+            # e_r, t_r = eval_(env, model, e_returns, e_lengths, max_return, agent_logger, ep, step,
+            #                  gamma=gamma, n=n_evaluations, normalise_state=normalise_state, log_compact=log_compact)
+            e_r, t_r = eval_(env, model, e_returns, e_lengths, max_return, logger, ep, step,
                              gamma=gamma, n=n_evaluations, normalise_state=normalise_state, log_compact=log_compact)
 
             # compute e-metric
@@ -632,12 +641,12 @@ def train_fair(env,
             print(f'epsilon max/mean: {epsilon.max():.3f} \t {epsilon.mean():.3f}')
             print('=' * 22, '\n', sep='')
 
-            if not (log_compact or log_coverage_set_only):
-                entries = []
-                for d, r in zip(e_returns, e_r):
-                    entry = eval_logger.create_entry(ep, step, epsilon.max(), epsilon.mean(), d, r.mean(0), "eval")
-                    entries.append(entry)
-                eval_logger.write_data(entries)
+            # if not (log_compact or log_coverage_set_only):
+            #     entries = []
+            #     for d, r in zip(e_returns, e_r):
+            #         entry = eval_logger.create_entry(ep, step, epsilon.max(), epsilon.mean(), d, r.mean(0), "eval")
+            #         entries.append(entry)
+            #     eval_logger.write_data(entries)
 
         update_num += 1
 

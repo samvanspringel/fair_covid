@@ -12,447 +12,703 @@ import base64
 import pandas as pd
 import datetime
 
-from dash import Dash, html, dcc, Input, Output, State, dash_table, no_update
+from dash import Dash, html, dcc, Input, Output, State, no_update, callback_context
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 
-import plotly.express as px  # If you prefer Plotly for easy date axes
+import plotly.express as px  # optional
 import matplotlib.pyplot as plt
 
-# ---------------------------------------------------------------------
-# Import your environment + model code.
-# Example placeholders for demonstration:
-# from scenario.main_pcn_core import create_covid_env, choose_action
-# ---------------------------------------------------------------------
+########################################################################
+# Paths & Global Vars
+########################################################################
+
+# CSV scenario uses the same CSV for demonstration
+CSV_HOSP_PATH = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/run_0.csv"
+CSV_ICU_PATH  = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/run_0.csv"
+
+# For the middle scenario (model #1)
+MODEL_DIR_MID = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/cluster/'covid/steps_300000/objectives_R_ARH:R_SB_W:R_SB_S:R_SB_L_SBS:ABFTA/distance_metric_none/window_100/seed_0/'/2025-03-13_15-18-42"
+
+# For the right scenario (model #2)
+MODEL_DIR_RIGHT = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/cluster/'covid/steps_300000/objectives_R_ARI:R_SB_W:R_SB_S:R_SB_L_SBS:ABFTA/distance_metric_none/window_100/seed_0/'/2025-03-13_15-19-10"
 
 OBJECTIVES = ["R_ARI", "R_ARH", "R_SB_W", "R_SB_S", "R_SB_L", "SB_SUM"]
-MODEL_DIR = "/Users/samvanspringel/Documents/School/VUB/Master 2/Jaar/Thesis/fair_covid/fairRLresults/covid/2024-11-26_11-45-30"
-CSV_HOSP_PATH = "/path/to/run_0.csv"
-CSV_ICU_PATH  = "/path/to/run_0.csv"
 
-# Global references to environment and model, so each callback can modify them
-GLOBAL_ENV = None
-GLOBAL_MODEL = None
+# We'll have separate "global" references for each environment + model
+GLOBAL_MODEL_MID = None
+GLOBAL_ENV_MID = None
 
-def list_models():
-    """Returns all candidate model files from MODEL_DIR."""
-    files = os.listdir(MODEL_DIR)
-    model_files = [f for f in files if f.startswith("model_") and f.endswith(".pt")]
+GLOBAL_MODEL_RIGHT = None
+GLOBAL_ENV_RIGHT = None
+
+########################################################################
+# Utilities
+########################################################################
+
+def list_models(dir_path):
+    """Return all candidate *.pt model files from a directory, matching 'model_10...'.pt."""
+    files = os.listdir(dir_path)
+    model_files = [f for f in files if f.startswith("model_10") and f.endswith(".pt")]
     return model_files
 
-def load_model(model_file):
-    """Loads the PyTorch model from disk and sets it to eval mode."""
-    print("loading", str(model_file))
-    model_path = os.path.join(MODEL_DIR, model_file)
+def reorder_models(models):
+    """Ensure 'model10.pt' is first in the list if it exists."""
+    if "model10.pt" in models:
+        models.remove("model10.pt")
+        models.insert(0, "model10.pt")
+    return models
+
+def load_model(model_file, dir_path):
+    """Load the PyTorch model from disk and set it to eval mode."""
+    print("loading model:", model_file, "from:", dir_path)
+    model_path = os.path.join(dir_path, model_file)
     loaded = torch.load(model_path)
     loaded.eval()
     return loaded
 
-def plot_matplotlib(dates, ys_list, labels, title, y_label):
+def plot_matplotlib(dates, ys_list, labels, title):
     """
-    A helper for plotting multiple lines with matplotlib, using `dates` on the x-axis.
-    `ys_list` is a list of lists (one list per line),
-    `labels` is a list of line labels,
-    `dates` is a list of x-values (datetime or string),
-    `title` and `y_label` are strings.
-    Returns a base64-encoded PNG string.
+    Plot multiple lines on the same figure, storing as base64-encoded PNG.
+    `dates`: x-axis list
+    `ys_list`: list of lists, one per line
+    `labels`: list of line labels
     """
     plt.figure(figsize=(6, 4))
-    for y, label in zip(ys_list, labels):
-        plt.plot(dates, y, label=label, marker='o')
+    for y, lbl in zip(ys_list, labels):
+        plt.plot(dates, y, label=lbl, marker='o')
 
     plt.title(title)
     plt.xlabel("Date")
-    plt.ylabel(y_label)
     plt.xticks(rotation=45, ha='right')
     plt.legend()
     plt.tight_layout()
 
-    img_bytes = BytesIO()
-    plt.savefig(img_bytes, format='png', bbox_inches='tight')
+    buf = BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close()
-    img_bytes.seek(0)
-    encoded = base64.b64encode(img_bytes.read()).decode("utf-8")
-    return f"data:image/png;base64,{encoded}"
+    buf.seek(0)
+    return "data:image/png;base64," + base64.b64encode(buf.read()).decode("utf-8")
 
 def load_csv_column(csv_path, column_name):
-    """
-    Example CSV loader for hospital or ICU data.
-    Groups by 'dates' and returns a list of lists (one sublist per day).
-    Adapt to your real structure if needed.
-    """
+    """Load CSV, group by 'dates', return list-of-lists for that column."""
     df = pd.read_csv(csv_path)
     grouped = df.groupby('dates')
-    list_compartment = []
+    result = []
     for _, frame in grouped:
-        list_compartment.append(frame[column_name].tolist())
-    return list_compartment
+        result.append(frame[column_name].tolist())
+    return result
 
-# ------------------------------------------------------------------------------
-# Dash App
-# ------------------------------------------------------------------------------
+########################################################################
+# Dash App + Layout
+########################################################################
+
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-model_options = [{"label": m, "value": m} for m in list_models()]
+# Reorder model lists so model10.pt is first if present
+models_mid = reorder_models(list_models(MODEL_DIR_MID))
+model_options_mid = [{"label": m, "value": m} for m in models_mid]
 
-# We'll keep the user-specified objectives, horizon, etc. in a Store,
-# as well as the simulation progress (dates, data arrays).
-# The 'data' field in a dcc.Store must be JSON-serializable, so we only store numbers/lists, not the env object.
+models_right = reorder_models(list_models(MODEL_DIR_RIGHT))
+model_options_right = [{"label": m, "value": m} for m in models_right]
+
+# Column 1 store (CSV scenario):
+CSV_STORE_DEFAULT = {
+    "index": 0,
+    "dates": [],
+    "hosp":  [],
+    "icu":   [],
+}
+
+# Column 2 store (Middle scenario):
+MID_STORE_DEFAULT = {
+    "all_dates":   [],
+    "hosp_values": [],
+    "icu_values":  [],
+    "actions":     [],
+    "horizon":     32,
+    "step_count":  0,
+}
+
+# Column 3 store (Right scenario):
+RIGHT_STORE_DEFAULT = {
+    "all_dates":   [],
+    "hosp_values": [],
+    "icu_values":  [],
+    "actions":     [],
+    "horizon":     32,
+    "step_count":  0,
+}
+
+# We'll load objectives from run_0.csv, which has columns "o_0..o_5"
+RUN_OBJECTIVES_PATH = CSV_HOSP_PATH
+
+def load_obj_columns(csv_path):
+    """Reads run_0.csv, storing each o_i column in a list, returning a dict."""
+    df = pd.read_csv(csv_path)
+    d = {}
+    for i in range(6):
+        col = f"o_{i}"
+        if col in df.columns:
+            d[col] = df[col].tolist()
+        else:
+            d[col] = []
+    return d
+
+def make_objstore_default():
+    return {
+        "index": 0,
+        "o_0": [],
+        "o_1": [],
+        "o_2": [],
+        "o_3": [],
+        "o_4": [],
+        "o_5": []
+    }
+
+# App Layout
 app.layout = dbc.Container([
-    dcc.Store(id="sim-data", data={
-        "all_dates":   [],   # list of string or ISO date for x-axis
-        "actions":     [],   # accumulates chosen actions
-        "hosp_values": [],   # accumulates total hospital values
-        "icu_values":  [],   # accumulates total ICU values
-        "horizon":     12,   # default
-        "step_count":  0,    # how many steps have been done
-    }),
-
-    # Header
     dbc.Row([
+        # Left Column: CSV scenario
         dbc.Col([
-            html.H1("PCN Simulation Dashboard"),
-            html.P("Press 'Run Epidemic' to advance one time step each press.")
-        ])
-    ]),
+            html.H2("CSV Scenario"),
+            dcc.Store(id="csv-data", data=CSV_STORE_DEFAULT),
+            dbc.Button("Next CSV Step", id="csv-run-button", n_clicks=0),
+            dbc.Button("Reset CSV", id="csv-reset-button", n_clicks=0, color="danger", style={"marginLeft": "10px"}),
+            html.Br(), html.Br(),
 
-    # Left Column: model & objective input
-    dbc.Row([
+            html.Div("Action:"),
+            html.Div(id="csv-action-value"),
+            html.Div("Hosp:"),
+            html.Div(id="csv-hosp-value"),
+            html.Div("ICU:"),
+            html.Div(id="csv-icu-value"),
+
+            html.Img(id="csv-main-plot", style={"width": "80%", "display": "block", "margin": "auto"}),
+            html.Img(id="csv-small-plot", style={"width": "60%", "display": "block", "margin": "auto"}),
+        ], width=4),
+
+        # Middle Column: ARH environment
         dbc.Col([
-            html.H3("Select Model"),
+            html.H2("ARH Model"),
+            dcc.Store(id="sim-data-middle", data=MID_STORE_DEFAULT),
+            dcc.Store(id="mid-objstore", data=make_objstore_default()),
+
+            html.Div("Select Model (ARH)"),
             dcc.Dropdown(
-                id="model-dropdown",
-                options=model_options,
-                value=model_options[0]["value"] if model_options else None,
+                id="model-dropdown-middle",
+                options=model_options_mid,
+                value=model_options_mid[0]["value"] if model_options_mid else None,
                 clearable=False
             ),
             html.Br(),
-            html.H3("Set Desired Returns"),
-            html.P("Enter the values for each objective:"),
-            *[
-                dbc.InputGroup([
-                    dbc.InputGroupText(obj_name),
-                    dbc.Input(id=f"obj-input-{i}", type="number", value=0.0)
-                ], className="mb-2")
-                for i, obj_name in enumerate(OBJECTIVES)
-            ],
-            html.Br(),
-            html.H3("Set Horizon Weeks"),
-            dbc.InputGroup([
-                dbc.InputGroupText("Horizon Weeks"),
-                dbc.Input(id="horizon-input", type="number", value=12)
-            ], className="mb-2"),
-            html.Br(),
-            html.H3("Set Desired Horizon"),
-            dbc.InputGroup([
-                dbc.InputGroupText("Desired Horizon Weeks"),
-                dbc.Input(id="desired_horizon-input", type="number", value=3)
-            ], className="mb-2"),
-            html.Br(),
-            dbc.Button("Load Parameters", id="load-button", color="secondary", n_clicks=0),
-            html.Br(),
-            html.Br(),
-            dbc.Button("Run Epidemic", id="run-button", color="primary", n_clicks=0),
-        ], width=3),
 
-        # Right Column: Action Display + Plots
+            dbc.Button("Load Next Obj (ARH)", id="mid-load-obj-button", n_clicks=0, color="secondary"),
+            html.Br(), html.Br(),
+
+            # Objectives in one row, bigger fields, labeled
+            html.Div([
+                "Objectives:",
+                dbc.Row([
+                    dbc.Col([
+                        html.Div(OBJECTIVES[i]),
+                        dbc.Input(
+                            id=f"mid-obj-input-{i}",
+                            type="number",
+                            value=0.0,
+                            style={"width": "100px"}  # bigger width
+                        )
+                    ], width="auto") for i in range(len(OBJECTIVES))
+                ], justify="start", align="center"),
+            ]),
+            html.Br(),
+
+            html.Div("Desired Horizon:"),
+            dbc.Input(id="mid-desired-horizon", type="number", value=2, style={"width": "80px"}),
+            html.Br(),
+
+            dbc.Button("Run", id="mid-run-button", color="primary", n_clicks=0),
+            dbc.Button("Reset", id="mid-reset-button", color="danger", n_clicks=0, style={"marginLeft": "10px"}),
+            html.Br(), html.Br(),
+
+            html.Div("Action (Mid):"),
+            html.Div(id="mid-action-display"),
+            html.Div("Hosp (Mid):"),
+            html.Div(id="mid-hosp-display"),
+            html.Div("ICU (Mid):"),
+            html.Div(id="mid-icu-display"),
+            html.Img(id="mid-main-plot", style={"width": "80%", "display": "block", "margin": "auto"}),
+        ], width=4),
+
+        # Right Column: ARI environment
         dbc.Col([
-            html.H3("Current Action Chosen"),
-            html.Div(id="current-action-display", style={"fontSize": "1.2em", "fontWeight": "bold"}),
+            html.H2("ARI Model"),
+            dcc.Store(id="sim-data-right", data=RIGHT_STORE_DEFAULT),
+            dcc.Store(id="right-objstore", data=make_objstore_default()),
+
+            html.Div("Select Model (ARI)"),
+            dcc.Dropdown(
+                id="model-dropdown-right",
+                options=model_options_right,
+                value=model_options_right[0]["value"] if model_options_right else None,
+                clearable=False
+            ),
             html.Br(),
 
-            html.H4("Most Recent Data Point"),
-            html.Div(id="latest-data-display", style={"fontSize": "1.0em"}),
+            dbc.Button("Load Next Obj (ARI)", id="right-load-obj-button", n_clicks=0, color="secondary"),
+            html.Br(), html.Br(),
+
+            # Objectives in one row, bigger fields, labeled
+            html.Div([
+                "Objectives:",
+                dbc.Row([
+                    dbc.Col([
+                        html.Div(OBJECTIVES[i]),
+                        dbc.Input(
+                            id=f"right-obj-input-{i}",
+                            type="number",
+                            value=0.0,
+                            style={"width": "100px"}  # bigger width
+                        )
+                    ], width="auto") for i in range(len(OBJECTIVES))
+                ], justify="start", align="center"),
+            ]),
             html.Br(),
 
-            html.H3("Hospital / ICU / Actions Plots"),
-            html.Img(id="hospital-plot", style={"width": "60%", "height": "auto"}),
-            html.Br(),
-            html.Img(id="icu-plot", style={"width": "60%", "height": "auto"}),
-            html.Br(),
-            html.Img(id="actions-plot", style={"width": "60%", "height": "auto"}),
+            html.Div("Desired Horizon:"),
+            dbc.Input(id="right-desired-horizon", type="number", value=2, style={"width": "80px"}),
             html.Br(),
 
-            # Example CSV comparison plots
-            html.H3("Hospital CSV Plot"),
-            html.Img(id="hospital-csv-plot", style={"width": "60%", "height": "auto"}),
-            html.Br(),
+            dbc.Button("Run", id="right-run-button", color="primary", n_clicks=0),
+            dbc.Button("Reset", id="right-reset-button", color="danger", n_clicks=0, style={"marginLeft": "10px"}),
+            html.Br(), html.Br(),
 
-            html.H3("ICU CSV Plot"),
-            html.Img(id="icu-csv-plot", style={"width": "60%", "height": "auto"}),
-            html.Br(),
-        ], width=9),
-    ]),
-
-    # Dataframes at the Bottom
-    dbc.Row([
-        dbc.Col([
-            html.H3("Dataframes"),
-            html.H4("Last State Dataframe"),
-            dash_table.DataTable(id="last-df"),
-            html.Br(),
-            html.H4("Other Dataframe"),
-            dash_table.DataTable(id="other-df")
-        ], width=12)
+            html.Div("Action (Right):"),
+            html.Div(id="right-action-display"),
+            html.Div("Hosp (Right):"),
+            html.Div(id="right-hosp-display"),
+            html.Div("ICU (Right):"),
+            html.Div(id="right-icu-display"),
+            html.Img(id="right-main-plot", style={"width": "80%", "display": "block", "margin": "auto"}),
+        ], width=4),
     ])
 ], fluid=True)
 
-# ------------------------------------------------------------------------------
-# Utility to read the final row from your pcn_log.csv
-def load_parameters_from_file():
-    df = pd.read_csv(os.path.join(MODEL_DIR, "pcn_log.csv"))
-    reference = df.iloc[-1]
-    # Example mapping
-    objectives_desired_returns = [
-        reference["return_0_desired"],
-        reference["return_1_desired"],
-        reference["return_2_desired"],
-        reference["return_3_desired"],
-        reference["return_4_desired"],
-        reference["return_5_desired"]
-    ]
-    horizon = reference["desired_horizon"]  # or whichever column
-    desired_horizon = reference["horizon_distance"]
-    return objectives_desired_returns, horizon, desired_horizon
+########################################################################
+# Left Column: CSV scenario (Run + Reset)
+########################################################################
 
-
-# ------------------------------------------------------------------------------
-# CALLBACK: Load parameters from file when "Load Parameters" is pressed
-# ------------------------------------------------------------------------------
-@app.callback(
-    [Output("obj-input-"+str(i), "value") for i in range(len(OBJECTIVES))]
-    + [Output("horizon-input", "value"), Output("desired_horizon-input", "value")],
-    [Input("load-button", "n_clicks")]
-)
-def load_parameters(n_clicks):
-    if n_clicks > 0:
-        obj_values, horizon, desired_horizon = load_parameters_from_file()
-        return obj_values + [horizon, desired_horizon]
-    else:
-        # No changes if not clicked
-        return [no_update]*(len(OBJECTIVES)+2)
-
-
-# ------------------------------------------------------------------------------
-# CALLBACK: Run 1 Timestep of the Epidemic
-# ------------------------------------------------------------------------------
 @app.callback(
     [
-        Output("sim-data", "data"),
-        Output("hospital-plot", "src"),
-        Output("icu-plot", "src"),
-        Output("actions-plot", "src"),
-        Output("hospital-csv-plot", "src"),
-        Output("icu-csv-plot", "src"),
-        Output("current-action-display", "children"),
-        Output("latest-data-display", "children"),
-        Output("last-df", "data"),
-        Output("last-df", "columns"),
-        Output("other-df", "data"),
-        Output("other-df", "columns"),
+        Output("csv-data", "data"),
+        Output("csv-action-value", "children"),
+        Output("csv-hosp-value", "children"),
+        Output("csv-icu-value", "children"),
+        Output("csv-main-plot", "src"),
+        Output("csv-small-plot", "src"),
     ],
-    [Input("run-button", "n_clicks")],
     [
-        State("model-dropdown", "value"),
-        State("sim-data", "data")
-    ]
-    + [State(f"obj-input-{i}", "value") for i in range(len(OBJECTIVES))]
-    + [State("horizon-input", "value")]
-    + [State("desired_horizon-input", "value")]
+        Input("csv-run-button", "n_clicks"),
+        Input("csv-reset-button", "n_clicks")
+    ],
+    [State("csv-data", "data")]
 )
-def run_simulation(
-    n_clicks,
-    model_file,
-    sim_data,        # the dictionary we stored
-    *args
-):
-    """
-    Each time the user presses the "Run Epidemic" button, we advance exactly one step.
-    The 'sim_data' dictionary accumulates the results across presses.
-    """
-    # If no clicks, do nothing
+def update_csv_data(run_clicks, reset_clicks, store_data):
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if triggered_id == "csv-reset-button":
+        return [
+            CSV_STORE_DEFAULT,
+            "N/A",
+            "0",
+            "0",
+            no_update,
+            no_update
+        ]
+
+    if run_clicks < 1:
+        raise PreventUpdate
+
+    if not store_data["dates"]:
+        csv_hosp_data = load_csv_column(CSV_HOSP_PATH, "i_hosp_new")
+        csv_icu_data  = load_csv_column(CSV_ICU_PATH,  "i_icu_new")
+
+        daily_hosp_sums = [sum(x) for x in csv_hosp_data]
+        daily_icu_sums  = [sum(x) for x in csv_icu_data]
+
+        start_date = datetime.date(2020, 3, 1)
+        dates = []
+        for i in range(len(daily_hosp_sums)):
+            day_date = start_date + datetime.timedelta(weeks=i)
+            dates.append(day_date.isoformat())
+
+        store_data["hosp"] = daily_hosp_sums
+        store_data["icu"]  = daily_icu_sums
+        store_data["dates"] = dates
+        store_data["index"] = 0
+
+    idx = store_data["index"]
+    all_dates = store_data["dates"]
+    hosp_vals = store_data["hosp"]
+    icu_vals  = store_data["icu"]
+
+    if idx >= len(all_dates):
+        raise PreventUpdate
+
+    current_hosp = hosp_vals[idx]
+    current_icu  = icu_vals[idx]
+    store_data["index"] += 1
+
+    x_plot = all_dates[: store_data["index"]]
+    hosp_plot_vals = hosp_vals[: store_data["index"]]
+    icu_plot_vals  = icu_vals[: store_data["index"]]
+
+    main_plot = plot_matplotlib(
+        x_plot,
+        [hosp_plot_vals, icu_plot_vals],
+        ["Hosp", "ICU"],
+        "CSV Data (Hosp + ICU)",
+    )
+    small_plot = plot_matplotlib(
+        all_dates,
+        [hosp_vals, icu_vals],
+        ["Hosp", "ICU"],
+        "All CSV Data",
+    )
+
+    return [
+        store_data,
+        "N/A",
+        f"{current_hosp:.0f}",
+        f"{current_icu:.0f}",
+        main_plot,
+        small_plot
+    ]
+
+########################################################################
+# Middle Column: Load Next Obj + Run / Reset
+########################################################################
+
+@app.callback(
+    [
+        Output("mid-objstore", "data"),
+        Output("mid-obj-input-0", "value"),
+        Output("mid-obj-input-1", "value"),
+        Output("mid-obj-input-2", "value"),
+        Output("mid-obj-input-3", "value"),
+        Output("mid-obj-input-4", "value"),
+        Output("mid-obj-input-5", "value"),
+    ],
+    [Input("mid-load-obj-button", "n_clicks")],
+    [State("mid-objstore", "data")]
+)
+def load_next_obj_mid(n_clicks, store):
     if n_clicks < 1:
         raise PreventUpdate
 
-    # Unpack objective/horizon from *args
-    # We have 6 objectives in the snippet, so that is indexes 0..5
-    # Then horizon is index 6, desired_horizon is index 7
-    # Adjust if the dimension of OBJECTIVES changes
+    if not store["o_0"]:
+        all_obj = load_obj_columns(RUN_OBJECTIVES_PATH)
+        for i in range(6):
+            store[f"o_{i}"] = all_obj[f"o_{i}"]
+
+    idx = store["index"]
+    if idx >= len(store["o_0"]):
+        raise PreventUpdate
+
+    val0 = store["o_0"][idx]
+    val1 = store["o_1"][idx]
+    val2 = store["o_2"][idx]
+    val3 = store["o_3"][idx]
+    val4 = store["o_4"][idx]
+    val5 = store["o_5"][idx]
+
+    store["index"] += 1
+
+    return [
+        store,
+        val0, val1, val2, val3, val4, val5
+    ]
+
+@app.callback(
+    [
+        Output("sim-data-middle", "data"),
+        Output("mid-action-display", "children"),
+        Output("mid-hosp-display", "children"),
+        Output("mid-icu-display", "children"),
+        Output("mid-main-plot", "src"),
+    ],
+    [
+        Input("mid-run-button", "n_clicks"),
+        Input("mid-reset-button", "n_clicks"),
+    ],
+    [
+        State("model-dropdown-middle", "value"),
+        State("sim-data-middle", "data")
+    ]
+    + [State(f"mid-obj-input-{i}", "value") for i in range(len(OBJECTIVES))]
+    + [State("mid-desired-horizon", "value")]
+)
+def combined_callback_middle(run_clicks, reset_clicks,
+                             model_file, sim_data,
+                             *args):
+    global GLOBAL_MODEL_MID, GLOBAL_ENV_MID
+
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if triggered_id == "mid-reset-button":
+        GLOBAL_ENV_MID = None
+        GLOBAL_MODEL_MID = None
+        return (
+            {
+                "all_dates":   [],
+                "hosp_values": [],
+                "icu_values":  [],
+                "actions":     [],
+                "horizon":     32,
+                "step_count":  0,
+            },
+            "Reset",
+            "0",
+            "0",
+            no_update
+        )
+
+    if (run_clicks or 0) < 1:
+        raise PreventUpdate
+
     num_objs = len(OBJECTIVES)
     desired_return_vals = args[0:num_objs]
-    horizon_weeks        = args[num_objs]
-    desired_horizon_weeks= args[num_objs+1]
-
-    # Convert to the type you need, e.g. float32
+    desired_horizon_weeks = args[num_objs]
     desired_return = np.array(desired_return_vals, dtype=np.float32)
 
-    global GLOBAL_ENV
-    global GLOBAL_MODEL
+    if GLOBAL_MODEL_MID is None:
+        GLOBAL_MODEL_MID = load_model(model_file, MODEL_DIR_MID)
 
-    # 1) Initialize environment & model if needed
-    if GLOBAL_MODEL is None or (model_file is not None and model_file != ""):
-        GLOBAL_MODEL = load_model(model_file)
+    if GLOBAL_ENV_MID is None:
+        GLOBAL_ENV_MID = create_covid_env([])
+        GLOBAL_ENV_MID.reset()
 
-    # If environment doesn't exist, create from scratch
-    if GLOBAL_ENV is None:
-        # create_covid_env can accept additional parameters as needed
-        GLOBAL_ENV = create_covid_env([])
-        GLOBAL_ENV.reset()
-
-    # We store "sim_data['horizon']" on the first run in the store or from user input
-    # so ensure they are in sync.
-    # If user changed horizon on the inputs, we can align it with the stored horizon:
-    if n_clicks == 1:
-        # On the first button click, set the store's horizon from the input
-        sim_data["horizon"] = horizon_weeks
-
-    # 2) If horizon is <= 0, we can skip stepping or forcibly do no_update
     if sim_data["horizon"] <= 0:
-        return [sim_data, no_update, no_update, no_update, no_update, no_update,
-                "Horizon exhausted", "No more steps possible", [], [], [], []]
+        return [
+            sim_data,
+            "Horizon exhausted",
+            "0", "0",
+            no_update
+        ]
 
-    # 3) Advance 1 step
-    #    choose_action(...) is your code to pick an action from the environment obs.
-    state = GLOBAL_ENV.current_state_n  # or however you get the current observation
-    action = GLOBAL_ENV.current_action
-    events = GLOBAL_ENV.current_events_n
+    state = GLOBAL_ENV_MID.current_state_n
+    action = GLOBAL_ENV_MID.current_action
+    events = GLOBAL_ENV_MID.current_events_n
     budget = np.ones(3)*4
-    print("Budget", GLOBAL_MODEL.sb_emb is None)
 
-    action = choose_action(GLOBAL_MODEL, (budget, state, events, action), desired_return, desired_horizon_weeks, eval=True)
+    action = choose_action(
+        GLOBAL_MODEL_MID, (budget, state, events, action),
+        desired_return, desired_horizon_weeks, eval=True
+    )
+    obs, reward, done, info = GLOBAL_ENV_MID.step(action)
+    state_df = GLOBAL_ENV_MID.state_df()[0]
 
-    # Step environment
-    obs, reward, done, info = GLOBAL_ENV.step(action)
-    state_df = GLOBAL_ENV.state_df()[0]
+    hospitalizations = float(state_df["I_hosp_new"].sum())
+    icu_admissions   = float(state_df["I_icu_new"].sum())
 
-    # 4) Extract data we want from the environment’s state for plotting:
-    #    e.g. "I_hosp_new" and "I_icu_new".
-    hospitalizations = state_df["I_hosp_new"].sum()
-    icu_admissions   = state_df["I_icu_new"].sum()
+    sim_data["actions"].append(list(action))
+    sim_data["hosp_values"].append(hospitalizations)
+    sim_data["icu_values"].append(icu_admissions)
 
-    # 5) Append new data to the sim_data lists
-    sim_data["actions"].append(action.tolist() if isinstance(action, np.ndarray) else list(action))
-    sim_data["hosp_values"].append(float(hospitalizations))
-    sim_data["icu_values"].append(float(icu_admissions))
-
-    # For the date axis, let's generate the next date from the step_count or from a start date
     step_count = sim_data["step_count"]
-    # We can define a start date. For example:
-    start_date = datetime.date(2025, 1, 1)
-    # Next date is:
+    start_date = datetime.date(2020, 3, 1)
     current_date = start_date + datetime.timedelta(weeks=step_count)
     sim_data["all_dates"].append(current_date.isoformat())
 
-    # Increase step count
     sim_data["step_count"] += 1
-
-    # Decrement horizon
     sim_data["horizon"] -= 1
 
-    # 6) Build the updated plots
-    #    We use the sim_data arrays to plot everything so it accumulates.
-    dates_for_plot = sim_data["all_dates"]
-
-    # Plot hospital
-    hosp_plot = plot_matplotlib(
-        dates_for_plot,
-        [sim_data["hosp_values"]],  # single line
-        ["Hospitalizations"],
-        "Hospitalizations Over Time",
-        "I_hosp_new",
+    main_plot = plot_matplotlib(
+        sim_data["all_dates"],
+        [sim_data["hosp_values"], sim_data["icu_values"]],
+        ["Hosp", "ICU"],
+        "Simulated (Hosp + ICU)",
     )
 
-    # Plot ICU
-    icu_plot = plot_matplotlib(
-        dates_for_plot,
-        [sim_data["icu_values"]],  # single line
-        ["ICU Admissions"],
-        "ICU Admissions Over Time",
-        "I_icu_new",
-    )
-
-    # Plot actions (we have 3 continuous dimensions)
-    # We'll transpose the list of lists
-    all_actions = list(zip(*sim_data["actions"]))  # 3 sublists
-    actions_plot = plot_matplotlib(
-        dates_for_plot,
-        all_actions,
-        ["Reduction Work", "Reduction School", "Reduction Leisure"],
-        "Continuous Reductions Over Time",
-        "Action Values",
-    )
-
-    # We can reload the CSV data each time (or once globally).
-    # Then plot them for comparison. For brevity we do it each time:
-    csv_hosp_data = load_csv_column(CSV_HOSP_PATH, "i_hosp_new")
-    csv_icu_data  = load_csv_column(CSV_ICU_PATH,  "i_icu_new")
-
-    # Suppose each "csv_hosp_data" is a list-of-lists. If you want to sum up each day:
-    # We'll also track a made-up date for them. E.g. same start date:
-    # This is just to give them an x-axis. Adjust as needed.
-    csv_dates = []
-    # If the CSV has N days, do something like:
-    for i in range(len(csv_hosp_data)):
-        day_date = start_date + datetime.timedelta(weeks=i)
-        csv_dates.append(day_date.isoformat())
-
-    # For demonstration, sum each sublist:
-    daily_hosp_sums = [sum(x) for x in csv_hosp_data]
-    daily_icu_sums  = [sum(x) for x in csv_icu_data]
-
-    hosp_csv_plot = plot_matplotlib(
-        csv_dates,
-        [daily_hosp_sums],
-        ["Hospital CSV Summed"],
-        "Hospital (CSV) Over Time",
-        "I_hosp_new (CSV)",
-    )
-    icu_csv_plot = plot_matplotlib(
-        csv_dates,
-        [daily_icu_sums],
-        ["ICU CSV Summed"],
-        "ICU (CSV) Over Time",
-        "I_icu_new (CSV)",
-    )
-
-    # 7) Prepare DataTables
-    #    "last_state_df" is from the environment
-    last_df_data = state_df.to_dict("records")
-    last_df_columns = [{"name": c, "id": c} for c in state_df.columns]
-
-    # Example "other_df"
-    df = pd.read_csv(os.path.join(MODEL_DIR, "pcn_log.csv"))
-    reference = df.iloc[-1]
-    other_df = pd.DataFrame({
-        "Col_A": [1, 2, 3],
-        "Col_B": [4, 5, 6]
-    })
-    other_df_data = other_df.to_dict('records')
-    other_df_columns = [{"name": col, "id": col} for col in other_df.columns]
-
-    # 8) Build a short text display for the current action + the new data point
-    action_str = f"Work={action[0]:.3f}, School={action[1]:.3f}, Leisure={action[2]:.3f}"
-    new_data_str = (
-        f"Date: {current_date.isoformat()} | "
-        f"Hospitalizations: {hospitalizations:.2f} | "
-        f"ICU: {icu_admissions:.2f}"
-    )
-    # Also print to server console, if desired:
-    print("[New Step] " + new_data_str)
+    action_str = f"{action}"
+    hosp_str   = f"{hospitalizations:.0f}"
+    icu_str    = f"{icu_admissions:.0f}"
 
     return [
         sim_data,
-        hosp_plot,
-        icu_plot,
-        actions_plot,
-        hosp_csv_plot,
-        icu_csv_plot,
         action_str,
-        new_data_str,
-        last_df_data,
-        last_df_columns,
-        other_df_data,
-        other_df_columns
+        hosp_str,
+        icu_str,
+        main_plot
+    ]
+
+########################################################################
+# Right Column: Load Next Obj + Run / Reset
+########################################################################
+
+@app.callback(
+    [
+        Output("right-objstore", "data"),
+        Output("right-obj-input-0", "value"),
+        Output("right-obj-input-1", "value"),
+        Output("right-obj-input-2", "value"),
+        Output("right-obj-input-3", "value"),
+        Output("right-obj-input-4", "value"),
+        Output("right-obj-input-5", "value"),
+    ],
+    [Input("right-load-obj-button", "n_clicks")],
+    [State("right-objstore", "data")]
+)
+def load_next_obj_right(n_clicks, store):
+    if n_clicks < 1:
+        raise PreventUpdate
+
+    if not store["o_0"]:
+        all_obj = load_obj_columns(RUN_OBJECTIVES_PATH)
+        for i in range(6):
+            store[f"o_{i}"] = all_obj[f"o_{i}"]
+
+    idx = store["index"]
+    if idx >= len(store["o_0"]):
+        raise PreventUpdate
+
+    val0 = store["o_0"][idx]
+    val1 = store["o_1"][idx]
+    val2 = store["o_2"][idx]
+    val3 = store["o_3"][idx]
+    val4 = store["o_4"][idx]
+    val5 = store["o_5"][idx]
+
+    store["index"] += 1
+
+    return [
+        store,
+        val0, val1, val2, val3, val4, val5
+    ]
+
+@app.callback(
+    [
+        Output("sim-data-right", "data"),
+        Output("right-action-display", "children"),
+        Output("right-hosp-display", "children"),
+        Output("right-icu-display", "children"),
+        Output("right-main-plot", "src"),
+    ],
+    [
+        Input("right-run-button", "n_clicks"),
+        Input("right-reset-button", "n_clicks"),
+    ],
+    [
+        State("model-dropdown-right", "value"),
+        State("sim-data-right", "data")
+    ]
+    + [State(f"right-obj-input-{i}", "value") for i in range(len(OBJECTIVES))]
+    + [State("right-desired-horizon", "value")]
+)
+def combined_callback_right(run_clicks, reset_clicks,
+                            model_file, sim_data,
+                            *args):
+    global GLOBAL_MODEL_RIGHT, GLOBAL_ENV_RIGHT
+
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if triggered_id == "right-reset-button":
+        GLOBAL_ENV_RIGHT = None
+        GLOBAL_MODEL_RIGHT = None
+        return (
+            {
+                "all_dates":   [],
+                "hosp_values": [],
+                "icu_values":  [],
+                "actions":     [],
+                "horizon":     32,
+                "step_count":  0,
+            },
+            "Reset",
+            "0",
+            "0",
+            no_update
+        )
+
+    if (run_clicks or 0) < 1:
+        raise PreventUpdate
+
+    num_objs = len(OBJECTIVES)
+    desired_return_vals = args[0:num_objs]
+    desired_horizon_weeks = args[num_objs]
+    desired_return = np.array(desired_return_vals, dtype=np.float32)
+
+    if GLOBAL_MODEL_RIGHT is None:
+        GLOBAL_MODEL_RIGHT = load_model(model_file, MODEL_DIR_RIGHT)
+
+    if GLOBAL_ENV_RIGHT is None:
+        GLOBAL_ENV_RIGHT = create_covid_env([])
+        GLOBAL_ENV_RIGHT.reset()
+
+    if sim_data["horizon"] <= 0:
+        return [
+            sim_data,
+            "Horizon exhausted",
+            "0", "0",
+            no_update
+        ]
+
+    state = GLOBAL_ENV_RIGHT.current_state_n
+    action = GLOBAL_ENV_RIGHT.current_action
+    events = GLOBAL_ENV_RIGHT.current_events_n
+    budget = np.ones(3)*4
+
+    action = choose_action(
+        GLOBAL_MODEL_RIGHT, (budget, state, events, action),
+        desired_return, desired_horizon_weeks, eval=True
+    )
+    obs, reward, done, info = GLOBAL_ENV_RIGHT.step(action)
+    state_df = GLOBAL_ENV_RIGHT.state_df()[0]
+
+    hospitalizations = float(state_df["I_hosp_new"].sum())
+    icu_admissions   = float(state_df["I_icu_new"].sum())
+
+    sim_data["actions"].append(list(action))
+    sim_data["hosp_values"].append(hospitalizations)
+    sim_data["icu_values"].append(icu_admissions)
+
+    step_count = sim_data["step_count"]
+    start_date = datetime.date(2020, 3, 1)
+    current_date = start_date + datetime.timedelta(weeks=step_count)
+    sim_data["all_dates"].append(current_date.isoformat())
+
+    sim_data["step_count"] += 1
+    sim_data["horizon"] -= 1
+
+    main_plot = plot_matplotlib(
+        sim_data["all_dates"],
+        [sim_data["hosp_values"], sim_data["icu_values"]],
+        ["Hosp", "ICU"],
+        "Simulated (Hosp + ICU, Right)",
+    )
+
+    action_str = f"{action}"
+    hosp_str   = f"{hospitalizations:.0f}"
+    icu_str    = f"{icu_admissions:.0f}"
+
+    return [
+        sim_data,
+        action_str,
+        hosp_str,
+        icu_str,
+        main_plot
     ]
 
 

@@ -92,6 +92,34 @@ def _pool_weakly_meritocratic_knn(args):
     return i, is_fair, max_diff
 
 
+def get_reduction_impact(C_diff):
+    areas, age_groups, _ = C_diff.shape
+
+    reduction_matrix = np.zeros((age_groups, areas))
+
+    for area in range(areas):
+        for age_group in range(age_groups):
+            reduction_age_group_area = C_diff[area, age_group, :]
+            overall_reduction_age_group = np.sum(reduction_age_group_area)
+
+            reduction_matrix[age_group, area] = overall_reduction_age_group
+
+    return reduction_matrix
+
+
+def get_distance_reduction(reduction_matrix, i, j):
+    epsilon = 1e-12
+
+    normalized_reduction_i = reduction_matrix[i]/np.sum(reduction_matrix[i])
+    normalized_reduction_j = reduction_matrix[j]/np.sum(reduction_matrix[j])
+
+    normalized_reduction_i_safe = np.clip(normalized_reduction_i, epsilon, None)
+    normalized_reduction_j_safe = np.clip(normalized_reduction_j, epsilon, None)
+
+    return np.sum(normalized_reduction_i_safe * np.log(normalized_reduction_i_safe / normalized_reduction_j_safe))
+
+
+
 class IndividualFairness(IndividualFairnessBase):
     """A collection of fairness notions w.r.t. individuals.
 
@@ -525,7 +553,8 @@ class IndividualFairness(IndividualFairnessBase):
 
                     fairness += C_diff[:, i, j] * term
 
-            fairness_window += fairness
+            fairness_window += fairness.sum()
+        # print("FAIRNESS WINDOW: ", fairness_window)
 
         return (0, 0), fairness_window, (0, [], 0)
 
@@ -538,6 +567,8 @@ class IndividualFairness(IndividualFairnessBase):
         for state_C_diff in states:
             state_df, C_diff = state_C_diff
 
+            reduction_impact = get_reduction_impact(C_diff)
+
             h = state_df["h_risk"]
 
             K = len(h)
@@ -548,7 +579,9 @@ class IndividualFairness(IndividualFairnessBase):
                 for j in range(K):
                     if i != j:
                         n += 1
-                        fairness += np.abs(h[i] - h[j]) - 0
+                        distance_reductions = get_distance_reduction(reduction_impact, i, j)
+                        fairness += np.abs(h[i] - h[j]) - distance_reductions
 
             fairness_window += -1 + (fairness/n)
+        # print("FAIRNESS WINDOW ABFTA: ", fairness_window)
         return (0, 0), fairness_window, (0, [], 0)
